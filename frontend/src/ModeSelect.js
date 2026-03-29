@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { BookOpen, Sparkles, ClipboardCheck, TrendingUp, ArrowRight } from 'lucide-react';
+import { BookOpen, Sparkles, TrendingUp, ArrowRight } from 'lucide-react';
 import RippleBackground from './RippleBackground';
+import ZariyaLogo from './ZariyaLogo';
 
 const UNPANIC_WAKE_REGEX = /unpanic\s+me/i;
 
@@ -26,15 +27,6 @@ const MODES = [
   },
   {
     id: 3,
-    title: 'Check-in',
-    subtitle: 'Progress — soon',
-    icon: ClipboardCheck,
-    core: 'from-zinc-500 to-rose-900',
-    glow: 'shadow-zinc-500/15',
-    border: 'border-zinc-500/25',
-  },
-  {
-    id: 4,
     title: 'Practise',
     subtitle: 'Live camera & reports',
     icon: TrendingUp,
@@ -46,14 +38,12 @@ const MODES = [
 ];
 
 /**
- * 2D projection of a 3D diamond: back apex, left/right mid, front base (largest Z).
- * SVG lines follow the same projection for a connected “constellation”.
+ * Triangle in depth: Interview back, Unpanic / Practise forward (Practise nearest).
  */
 const NODE_POS = {
-  1: { x: 50, y: 16, z: 18 },
-  2: { x: 14, y: 46, z: 52 },
-  3: { x: 86, y: 46, z: 52 },
-  4: { x: 50, y: 80, z: 108 },
+  1: { x: 50, y: 18, z: 28 },
+  2: { x: 20, y: 74, z: 68 },
+  3: { x: 80, y: 74, z: 108 },
 };
 
 export default function ModeSelect({ onSelectMode }) {
@@ -139,16 +129,19 @@ export default function ModeSelect({ onSelectMode }) {
     <RippleBackground>
       <div className="flex min-h-screen flex-col px-4 pb-16 pt-6 sm:px-8">
         <header className="mx-auto mb-6 flex w-full max-w-5xl items-end justify-between gap-4 sm:mb-8">
-          <div>
-            <p className="font-display text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
-              Zariya
-            </p>
-            <h1 className="font-display mt-1 text-3xl font-bold tracking-tight text-white sm:text-4xl">
-              Choose a mode
-            </h1>
-            <p className="mt-2 max-w-md text-sm text-zinc-500">
-              Four nodes in depth — back to front. Move the mouse to orbit the space.
-            </p>
+          <div className="flex items-start gap-4">
+            <ZariyaLogo size={48} className="mt-0.5 shrink-0" />
+            <div>
+              <p className="font-display text-xs font-semibold uppercase tracking-[0.2em] text-zinc-500">
+                Zariya
+              </p>
+              <h1 className="font-display mt-1 text-3xl font-bold tracking-tight text-white sm:text-4xl">
+                Choose a mode
+              </h1>
+              <p className="mt-2 max-w-md text-sm text-zinc-500">
+                Three nodes in depth — back to front. Move the mouse to orbit the space.
+              </p>
+            </div>
           </div>
           <p className="hidden max-w-xs text-right text-xs leading-relaxed text-zinc-500 sm:block">
             Say <span className="font-medium text-rose-300">“Unpanic me”</span> in Chrome to open Unpanic
@@ -182,10 +175,7 @@ export default function ModeSelect({ onSelectMode }) {
                 {[
                   [1, 2],
                   [1, 3],
-                  [1, 4],
                   [2, 3],
-                  [2, 4],
-                  [3, 4],
                 ].map(([a, b], i) => (
                   <line
                     key={`${a}-${b}-${i}`}

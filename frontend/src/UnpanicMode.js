@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { ArrowLeft, Mic, Sparkles } from 'lucide-react';
+import { ArrowLeft, Mic } from 'lucide-react';
 import RippleBackground from './RippleBackground';
+import ZariyaLogo from './ZariyaLogo';
 
 const CONVAI_SCRIPT = 'https://unpkg.com/@elevenlabs/convai-widget-embed';
 const DEFAULT_AGENT_ID =
@@ -139,16 +140,19 @@ export default function UnpanicMode({ onBack }) {
   return (
     <RippleBackground>
     <div className="flex min-h-screen flex-col items-center px-4 pb-12 pt-16">
-      <div className="mb-8 flex w-full max-w-lg items-center justify-between">
+      <div className="mb-8 flex w-full max-w-lg items-center justify-between gap-3">
         <button
           type="button"
           onClick={onBack}
-          className="inline-flex items-center gap-2 text-sm text-zinc-400 hover:text-white"
+          className="inline-flex shrink-0 items-center gap-2 text-sm text-zinc-400 hover:text-white"
         >
           <ArrowLeft size={18} />
           Modes
         </button>
-        <span className="text-xs uppercase tracking-wider text-zinc-500">Unpanic me</span>
+        <div className="flex items-center gap-2">
+          <ZariyaLogo size={30} />
+          <span className="text-xs uppercase tracking-wider text-zinc-500">Unpanic me</span>
+        </div>
       </div>
 
       <div className="flex w-full max-w-sm flex-1 flex-col items-center justify-center">
@@ -170,8 +174,8 @@ export default function UnpanicMode({ onBack }) {
 
           <div className="flex min-h-[520px] flex-col bg-gradient-to-b from-zinc-950 to-black px-4 pb-6 pt-4">
             <div className="mb-4 flex items-center justify-center gap-2 text-sm font-medium text-rose-200/90">
-              <Sparkles size={16} />
-              Zariya · Unpanic
+              <ZariyaLogo size={26} aria-hidden />
+              <span>Zariya · Unpanic</span>
             </div>
 
             {/* Orb — always visible, pulses faster once call has started */}
@@ -214,10 +218,7 @@ export default function UnpanicMode({ onBack }) {
           </div>
         </div>
 
-        <p className="mt-6 max-w-xs text-center text-xs text-zinc-600">
-          Agent ID is set via <code className="text-rose-400/90">REACT_APP_ELEVENLABS_CONVAI_AGENT_ID</code> or
-          defaults to your ElevenLabs agent.
-        </p>
+        
       </div>
     </div>
     </RippleBackground>

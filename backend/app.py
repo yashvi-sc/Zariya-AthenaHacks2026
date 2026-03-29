@@ -987,7 +987,7 @@ MODEL_PATH = os.environ.get(
 # Client sends ~10 frames/s → N frames ≈ N/10 seconds of open-lip video in the buffer.
 FRAME_BUFFER_SIZE = int(os.environ.get("ZARIYA_FRAME_BUFFER_SIZE", "50"))
 # Minimum seconds between consecutive predictions (after one fires, wait this long for the next).
-PREDICTION_COOLDOWN = float(os.environ.get("ZARIYA_PREDICTION_COOLDOWN_SECONDS", "16.0"))
+PREDICTION_COOLDOWN = float(os.environ.get("ZARIYA_PREDICTION_COOLDOWN_SECONDS", "5.0"))
 
 TARGET_SIZE = (96, 96)
 
@@ -2005,7 +2005,7 @@ When [Signals] lines appear after a candidate turn, use them to judge pacing and
 Transcript:
 {block}
 
-Use clear markdown headings (##) and bullet points."""
+Use plain text bullet points."""
         report = _gemini_generate_text(prompt, max_tokens=2048)
     except ValueError as e:
         return jsonify({"error": str(e)}), 503

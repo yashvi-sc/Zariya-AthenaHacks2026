@@ -10,21 +10,21 @@ import {
   Volume2,
   MessageCircle,
   Timer,
-  CheckCircle2,
   Camera,
   CameraOff,
   Video,
 } from 'lucide-react';
 import { API_BASE } from './api';
 import RippleBackground from './RippleBackground';
+import ZariyaLogo from './ZariyaLogo';
 
 /** Place `interviewer.mp4` in `frontend/public/` for the virtual interviewer tile. */
 const INTERVIEWER_VIDEO_SRC = `${process.env.PUBLIC_URL || ''}/interviewer.mp4`;
 
 const OPENING_LINE = 'Tell me a little bit about yourself.';
 const WAKE_REGEX = /(hey|hi|hello)[,\s]+let'?s\s+start(\s+my)?\s+interview/i;
-const THINK_SECONDS = 15;
-const ANSWER_SECONDS = 60;
+const THINK_SECONDS = 10;
+const ANSWER_SECONDS = 20;
 /** Match backend filler list for counts */
 const FILLER_RE = /\b(um|uh|uhm|erm|like|you know|basically|actually|sort of|kind of|i mean|well)\b/gi;
 
@@ -104,6 +104,151 @@ function playBlobWithLiveWords(blob, fullText, audioRef, setLiveReveal) {
     };
     audio.play().catch(reject);
   });
+}
+
+function emojiForSectionTitle(title) {
+  const t = (title || '').toLowerCase();
+  if (t.includes('summary')) return '📋';
+  if (t.includes('strength')) return '💪';
+  if (t.includes('improve') || t.includes('weakness') || t.includes('growth')) return '🎯';
+  if (t.includes('suggest') || t.includes('next') || t.includes('practice') || t.includes('focus')) return '📝';
+  if (t.includes('conclusion') || t.includes('overall')) return '✅';
+  if (t.includes('feedback') || t.includes('report')) return '✨';
+  return '▸';
+}
+
+function renderInline(text) {
+  if (!text) return null;
+  const parts = String(text).split(/(\*\*[^*]+\*\*)/g);
+  return parts.map((part, idx) => {
+    if (/^\*\*.+\*\*$/.test(part)) {
+      const inner = part.slice(2, -2);
+      return (
+        <strong key={idx} className="font-semibold text-rose-200">
+          {inner}
+        </strong>
+      );
+    }
+    return <span key={idx}>{part}</span>;
+  });
+}
+
+function InterviewReportDocument({ markdown }) {
+  if (!markdown?.trim()) {
+    return <p className="text-sm text-zinc-500">—</p>;
+  }
+
+  const lines = markdown.split(/\r?\n/);
+  const elements = [];
+  let listItems = [];
+  let rk = 0;
+  const nextKey = () => `ir-${rk++}`;
+
+  const flushList = () => {
+    if (listItems.length === 0) return;
+    elements.push(
+      <ul key={nextKey()} className="my-3 space-y-2.5 border-l border-rose-500/25 pl-3">
+        {listItems.map((item, i) => (
+          <li key={i} className="flex gap-2.5 text-sm leading-relaxed text-zinc-300">
+            <span className="mt-0.5 shrink-0 text-base leading-none text-rose-400/80" aria-hidden>
+              ✦
+            </span>
+            <span className="min-w-0">{renderInline(item)}</span>
+          </li>
+        ))}
+      </ul>
+    );
+    listItems = [];
+  };
+
+  lines.forEach((line) => {
+    const trimmed = line.trim();
+    if (!trimmed) {
+      flushList();
+      return;
+    }
+
+    if (/^####\s+/.test(trimmed)) {
+      flushList();
+      const title = trimmed.replace(/^####\s+/, '');
+      elements.push(
+        <h4
+          key={nextKey()}
+          className="mb-1.5 mt-4 font-display text-sm font-semibold tracking-wide text-rose-200/95 first:mt-0"
+        >
+          {renderInline(title)}
+        </h4>
+      );
+      return;
+    }
+    if (/^###\s+/.test(trimmed)) {
+      flushList();
+      const title = trimmed.replace(/^###\s+/, '');
+      const em = emojiForSectionTitle(title);
+      elements.push(
+        <div
+          key={nextKey()}
+          className="mt-6 flex items-start gap-3 rounded-xl border border-white/10 bg-black/30 px-4 py-3 first:mt-0"
+        >
+          <span className="text-xl leading-none" aria-hidden>
+            {em}
+          </span>
+          <h3 className="font-display text-lg font-semibold leading-snug text-white">{renderInline(title)}</h3>
+        </div>
+      );
+      return;
+    }
+    if (/^##\s+/.test(trimmed)) {
+      flushList();
+      const title = trimmed.replace(/^##\s+/, '');
+      elements.push(
+        <h2
+          key={nextKey()}
+          className="font-display mt-6 border-b border-white/10 pb-2 text-xl font-bold tracking-tight text-white first:mt-0"
+        >
+          <span className="mr-2 text-rose-400/90" aria-hidden>
+            ✨
+          </span>
+          {renderInline(title)}
+        </h2>
+      );
+      return;
+    }
+    if (/^#\s+/.test(trimmed)) {
+      flushList();
+      const title = trimmed.replace(/^#\s+/, '');
+      elements.push(
+        <h2 key={nextKey()} className="font-display text-2xl font-bold text-white first:mt-0">
+          {renderInline(title)}
+        </h2>
+      );
+      return;
+    }
+
+    if (/^\s*[-*]\s+/.test(trimmed)) {
+      listItems.push(trimmed.replace(/^\s*[-*]\s+/, ''));
+      return;
+    }
+    if (/^\s*\d+\.\s+/.test(trimmed)) {
+      listItems.push(trimmed.replace(/^\s*\d+\.\s+/, ''));
+      return;
+    }
+
+    flushList();
+    elements.push(
+      <p key={nextKey()} className="my-2.5 text-sm leading-relaxed text-zinc-400">
+        {renderInline(trimmed)}
+      </p>
+    );
+  });
+
+  flushList();
+
+  return (
+    <div className="rounded-xl border border-white/10 bg-gradient-to-b from-black/35 to-black/15 p-4 sm:p-5">
+      <div className="space-y-0">{elements}</div>
+    </div>
+  );
 }
 
 export default function InterviewMode({ onBack }) {
@@ -294,7 +439,7 @@ export default function InterviewMode({ onBack }) {
         setTimerPhase('answer');
         setThinkLeft(0);
         setAnswerLeft(ANSWER_SECONDS);
-        setStatusLine('Your turn — speak your answer (live transcript below).');
+        setStatusLine('It\'s your turn now, speak your answer (live transcript below).');
 
         const Rec = getSpeechRecognition();
         if (!Rec) {
@@ -645,19 +790,22 @@ export default function InterviewMode({ onBack }) {
     <RippleBackground>
     <div className="min-h-screen p-4 pb-12 pt-16 sm:p-6 sm:pt-20 lg:p-8">
       <div className="mx-auto flex w-full max-w-7xl flex-col gap-4">
-        <div className="w-full flex justify-between items-center">
-          <button
-            type="button"
-            onClick={() => {
-              stopCamera();
-              endInterview();
-              onBack();
-            }}
-            className="inline-flex items-center gap-2 text-sm text-zinc-400 hover:text-white"
-          >
-            <ArrowLeft size={18} />
-            Modes
-          </button>
+        <div className="flex w-full items-center justify-between gap-3">
+          <div className="flex min-w-0 items-center gap-3">
+            <button
+              type="button"
+              onClick={() => {
+                stopCamera();
+                endInterview();
+                onBack();
+              }}
+              className="inline-flex shrink-0 items-center gap-2 text-sm text-zinc-400 hover:text-white"
+            >
+              <ArrowLeft size={18} />
+              Modes
+            </button>
+            <ZariyaLogo size={32} />
+          </div>
           {phase === 'active' && (
             <button
               type="button"
@@ -706,7 +854,7 @@ export default function InterviewMode({ onBack }) {
             {/* Left: Meet-style videos + transcript below */}
             <div className="w-full xl:flex-1 min-w-0 flex flex-col gap-3 order-2 xl:order-1">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <p className="text-xs text-slate-400">Turn your camera on before starting for a Meet-style view.</p>
+                <p className="text-xs text-slate-400">Turn your camera on before starting.</p>
                 <button
                   type="button"
                   onClick={toggleCamera}
@@ -916,12 +1064,12 @@ export default function InterviewMode({ onBack }) {
             </button>
           </div>
 
-          <div className="rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-md">
-            <h2 className="text-white font-semibold mb-3 flex items-center gap-2">
-              <CheckCircle2 size={20} className="text-emerald-400" />
+          <div className="rounded-2xl border border-white/10 bg-white/[0.04] p-5 backdrop-blur-md">
+            <h2 className="mb-3 flex items-center gap-3 font-semibold text-white">
+              <ZariyaLogo size={40} aria-hidden />
               Interview report
             </h2>
-            <p className="text-xs text-slate-500 mb-3">
+            <p className="mb-4 text-xs text-zinc-500">
               The coach uses your words plus timing/filler/pause signals from each answer to judge clarity and pacing.
             </p>
             {reportLoading ? (
@@ -930,9 +1078,7 @@ export default function InterviewMode({ onBack }) {
                 Generating report…
               </div>
             ) : (
-              <div className="text-slate-200 text-sm leading-relaxed whitespace-pre-wrap">
-                {reportMd || '—'}
-              </div>
+              <InterviewReportDocument markdown={reportMd} />
             )}
             <button
               type="button"

@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Mail, Camera, Square, Mic, Volume2, AlertCircle, Activity, Zap, Heart, FileText, Download, Stethoscope, Clock, Award, LogOut, Loader2, ListChecks, ArrowLeft, Lightbulb } from 'lucide-react';
+import { Mail, Camera, Square, Mic, Volume2, AlertCircle, Activity, Zap, Heart, Download, Clock, Award, LogOut, Loader2, ListChecks, ArrowLeft, Lightbulb } from 'lucide-react';
 import ModeSelect from './ModeSelect';
+import ZariyaLogo from './ZariyaLogo';
 import InterviewMode from './InterviewMode';
 import UnpanicMode from './UnpanicMode';
 import Auth from './Auth';
@@ -37,7 +38,7 @@ function formatClockFromSeconds(seconds) {
   return `${mins}:${secs.toString().padStart(2, '0')}`;
 }
 
-/** Aggregates Mode 4 session data for report UI, download, and email. */
+/** Aggregates Practise session data for report UI, download, and email. */
 function buildStructuredReportData({
   allPredictions,
   emotionHistory,
@@ -126,7 +127,7 @@ function buildStructuredReportData({
 export default function MedicalLipReadingApp() {
   const [authSession, setAuthSession] = useState(null);
   const [authChecking, setAuthChecking] = useState(true);
-  /** null = show mode picker; 1–3 = placeholders; 4 = live practise (existing flow). */
+  /** null = mode picker; 1 = Interview; 2 = Unpanic; 3 = Practise (live camera). */
   const [selectedAppMode, setSelectedAppMode] = useState(null);
   
   const [isStreaming, setIsStreaming] = useState(false);
@@ -798,7 +799,8 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
   if (authChecking) {
     return (
       <RippleBackground>
-        <div className="flex min-h-screen flex-col items-center justify-center gap-4">
+        <div className="flex min-h-screen flex-col items-center justify-center gap-5">
+          <ZariyaLogo size={56} />
           <div className="relative">
             <div className="absolute inset-0 animate-ping rounded-full bg-rose-500/20" />
             <Loader2 className="relative animate-spin text-rose-400" size={40} strokeWidth={1.5} />
@@ -818,7 +820,7 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
       <span className="hidden max-w-[160px] truncate text-xs text-zinc-400 sm:inline sm:text-sm">
         {authSession.user?.name || authSession.user?.email}
       </span>
-      {(selectedAppMode === 4 || selectedAppMode === 1 || selectedAppMode === 2) && (
+      {(selectedAppMode === 3 || selectedAppMode === 1 || selectedAppMode === 2) && (
         <button
           type="button"
           onClick={goToModeSelect}
@@ -852,7 +854,7 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
     );
   }
 
-  if (selectedAppMode === 4 && showReport) {
+  if (selectedAppMode === 3 && showReport) {
     const report = generateReport();
     const sessionAvgDtw =
       sessionDtwScores.length > 0
@@ -868,9 +870,7 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
           <div className="rounded-xl border border-white/10 bg-white/[0.06] p-6 shadow-2xl shadow-black/40 backdrop-blur-xl sm:p-8">
             <div className="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
               <div className="flex items-center gap-3">
-                <div className="rounded-2xl bg-gradient-to-r from-rose-600 to-red-600 p-3 shadow-lg shadow-rose-900/30">
-                  <FileText size={28} className="text-white" />
-                </div>
+                <ZariyaLogo size={48} />
                 <div>
                   <h1 className="font-display text-2xl font-bold text-white sm:text-3xl">Session report</h1>
                   <p className="text-sm text-zinc-500">{new Date().toLocaleString()}</p>
@@ -1038,7 +1038,7 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
 
             <div className="mb-6 rounded-xl border border-white/10 bg-black/20 p-5">
               <h2 className="mb-3 flex items-center gap-2 font-semibold text-white">
-                <Stethoscope size={18} className="text-rose-300" />
+                <ZariyaLogo size={22} aria-hidden className="opacity-90" />
                 Clinical notes
               </h2>
               <textarea
@@ -1107,30 +1107,6 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
     );
   }
 
-  if (selectedAppMode === 3) {
-    return (
-      <>
-        {authBar}
-        <RippleBackground>
-          <div className="flex min-h-screen flex-col items-center justify-center p-4 pt-20 sm:p-8">
-            <div className="max-w-lg px-4 text-center">
-              <h1 className="font-display mb-2 text-2xl font-bold text-white">Coming soon</h1>
-              <p className="mb-6 text-zinc-500">This mode is not available yet. Check back later.</p>
-              <button
-                type="button"
-                onClick={() => setSelectedAppMode(null)}
-                className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/10 px-4 py-2.5 text-white transition hover:bg-white/15"
-              >
-                <ArrowLeft size={18} />
-                Back to modes
-              </button>
-            </div>
-          </div>
-        </RippleBackground>
-      </>
-    );
-  }
-
   return (
     <>
       {authBar}
@@ -1139,15 +1115,13 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
       <div className="mx-auto max-w-7xl">
 
         <div className="mb-8 text-center">
-          <div className="mb-4 flex items-center justify-center gap-3">
-            <div className="rounded-2xl bg-gradient-to-r from-rose-600 to-red-600 p-3 shadow-lg shadow-rose-900/30">
-              <Stethoscope size={32} className="text-white" />
-            </div>
+          <div className="mb-4 flex flex-col items-center justify-center gap-3 sm:flex-row sm:gap-5">
+            <ZariyaLogo size={60} />
             <h1 className="font-display text-4xl font-bold text-white sm:text-5xl">
               Zariya
             </h1>
           </div>
-          <p className="text-lg text-zinc-400">Your speech training assistant</p>
+          <p className="text-lg text-zinc-400">Your practise buddy.</p>
         </div>
 
         {errorMsg && (
@@ -1270,7 +1244,7 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
         <div className="mb-6 rounded-xl border border-white/10 bg-white/[0.06] p-4 shadow-xl backdrop-blur-md">
           <h2 className="mb-2 flex items-center gap-2 text-xl font-semibold text-white">
             <ListChecks size={24} className="text-amber-400" />
-            Template matching — calibration sentences
+            Review your sentences
           </h2>
           <p className="mb-4 text-sm text-zinc-500">
             Record each sentence once (lips open, clear articulation). After you stop, Zariya checks motion quality and tells you if you should record again. Use the same flow for all six sentences before live practice.
@@ -1477,9 +1451,9 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
           </div>
         )}
 
-        <div className="rounded-xl border border-white/10 bg-black/25 p-6 backdrop-blur-sm">
+        {/* <div className="rounded-xl border border-white/10 bg-black/25 p-6 backdrop-blur-sm">
           <h3 className="mb-3 flex items-center gap-2 text-lg font-semibold text-zinc-200">
-            <Stethoscope size={20} className="text-rose-400" />
+            <ZariyaLogo size={22} aria-hidden />
             Medical usage
           </h3>
           <div className="grid gap-4 text-sm text-zinc-400 sm:grid-cols-2">
@@ -1509,7 +1483,7 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
               {emotionDetectionStatus !== 'ready' && ' (Unavailable — check server console.)'}
             </p>
           </div>
-        </div>
+        </div> */}
       </div>
 
       <canvas ref={canvasRef} style={{ display: 'none' }} />

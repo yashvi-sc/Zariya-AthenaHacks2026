@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { LogIn, UserPlus, Mail, Lock, User, AlertCircle, Loader2, ArrowRight } from 'lucide-react';
 import { registerUser, loginUser, saveAuth } from './api';
 import RippleBackground from './RippleBackground';
+import ZariyaLogo from './ZariyaLogo';
 
 export default function Auth({ onAuthenticated }) {
   const [mode, setMode] = useState('login');
@@ -37,9 +38,7 @@ export default function Auth({ onAuthenticated }) {
       <div className="flex min-h-screen flex-col">
         <header className="relative z-20 flex items-center justify-between px-6 py-5 sm:px-10">
           <div className="flex items-center gap-3">
-            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-rose-600 to-red-700 shadow-lg shadow-rose-900/40">
-              <span className="font-display text-sm font-bold text-white">Z</span>
-            </div>
+            <ZariyaLogo size={36} />
             <span className="font-display text-lg font-semibold tracking-tight text-white">Zariya</span>
           </div>
           <a
@@ -53,16 +52,22 @@ export default function Auth({ onAuthenticated }) {
 
         <div className="flex flex-1 flex-col items-center justify-center px-4 pb-16 pt-4 sm:px-8">
           <div id="auth-form" className="w-full max-w-[420px]">
+            <div className="mb-6 flex flex-col items-center gap-2 text-center sm:mb-8">
+              <div className="flex items-center justify-center gap-3">
+                <ZariyaLogo size={52} />
+                <span className="font-display text-3xl font-bold tracking-tight text-white sm:text-4xl">Zariya</span>
+              </div>
+            </div>
             <div className="mb-8 text-center sm:mb-10">
               <h1 className="font-display text-4xl font-bold tracking-tight text-white sm:text-5xl">
-                Speech clarity,
+              Every word, 
                 <br />
                 <span className="bg-gradient-to-r from-zinc-100 via-white to-zinc-400 bg-clip-text text-transparent">
-                  reimagined
+                more confident than before.
                 </span>
               </h1>
               <p className="mx-auto mt-4 max-w-sm text-sm leading-relaxed text-zinc-400">
-                Lip-reading practice, emotion-aware sessions, and voice-guided modes — sign in to continue.
+              Turn everyday practice into confident communication.
               </p>
             </div>
 
