@@ -16,6 +16,7 @@ import {
   Video,
 } from 'lucide-react';
 import { API_BASE } from './api';
+import RippleBackground from './RippleBackground';
 
 /** Place `interviewer.mp4` in `frontend/public/` for the virtual interviewer tile. */
 const INTERVIEWER_VIDEO_SRC = `${process.env.PUBLIC_URL || ''}/interviewer.mp4`;
@@ -641,8 +642,9 @@ export default function InterviewMode({ onBack }) {
   const lastUserMeta = userTurns.length ? userTurns[userTurns.length - 1].meta : null;
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-indigo-950 to-slate-900 p-4 sm:p-6 lg:p-8">
-      <div className="max-w-7xl mx-auto w-full flex flex-col gap-4">
+    <RippleBackground>
+    <div className="min-h-screen p-4 pb-12 pt-16 sm:p-6 sm:pt-20 lg:p-8">
+      <div className="mx-auto flex w-full max-w-7xl flex-col gap-4">
         <div className="w-full flex justify-between items-center">
           <button
             type="button"
@@ -651,7 +653,7 @@ export default function InterviewMode({ onBack }) {
               endInterview();
               onBack();
             }}
-            className="inline-flex items-center gap-2 text-indigo-200/90 hover:text-white text-sm"
+            className="inline-flex items-center gap-2 text-sm text-zinc-400 hover:text-white"
           >
             <ArrowLeft size={18} />
             Modes
@@ -669,12 +671,12 @@ export default function InterviewMode({ onBack }) {
         </div>
 
         {phase === 'active' && (
-          <div className="w-full rounded-xl border border-indigo-500/30 bg-indigo-950/40 px-4 py-3 text-sm text-indigo-100">
-            <div className="flex items-center gap-2 font-medium text-indigo-200 mb-2">
+          <div className="w-full rounded-xl border border-rose-500/25 bg-black/35 px-4 py-3 text-sm text-zinc-200">
+            <div className="mb-2 flex items-center gap-2 font-medium text-rose-200">
               <Timer size={16} />
               Timed rounds
             </div>
-            <p className="text-indigo-100/90">
+            <p className="text-zinc-300">
               After each question: <strong>{THINK_SECONDS}s</strong> to think (no recording), then{' '}
               <strong>{ANSWER_SECONDS}s</strong> to answer. Timing and filler/pause counts are sent to your report.
             </p>
@@ -763,8 +765,8 @@ export default function InterviewMode({ onBack }) {
                     <div className="absolute inset-0 flex flex-col items-center justify-center bg-slate-900/95 text-slate-400 px-4 text-center gap-1">
                       <Video size={32} className="opacity-50" />
                       <span className="text-xs leading-snug">
-                        Add <code className="text-indigo-300">interviewer.mp4</code> to{' '}
-                        <code className="text-indigo-300">frontend/public/</code>
+                        Add <code className="text-rose-300">interviewer.mp4</code> to{' '}
+                        <code className="text-rose-300">frontend/public/</code>
                       </span>
                     </div>
                   )}
@@ -777,11 +779,11 @@ export default function InterviewMode({ onBack }) {
               {/* Transcript below videos */}
               <div className="rounded-xl border border-white/10 bg-black/35 p-4 flex flex-col gap-4 min-h-[200px]">
                 <div>
-                  <div className="flex items-center gap-2 text-violet-200 text-sm font-medium mb-1">
+                  <div className="mb-1 flex items-center gap-2 text-sm font-medium text-rose-200">
                     <MessageCircle size={16} />
                     Interviewer (live text)
                   </div>
-                  <p className="text-xs text-violet-300/70 mb-2">Synced with AI voice.</p>
+                  <p className="mb-2 text-xs text-zinc-500">Synced with AI voice.</p>
                   <div className="max-h-32 overflow-y-auto text-sm text-slate-100 leading-relaxed">
                     {interviewerReveal ? (
                       <p className="text-white">{interviewerReveal}</p>
@@ -801,15 +803,15 @@ export default function InterviewMode({ onBack }) {
                   )}
                 </div>
                 <div className="border-t border-white/10 pt-3">
-                  <div className="flex items-center gap-2 text-teal-200 text-sm font-medium mb-2">
+                  <div className="mb-2 flex items-center gap-2 text-sm font-medium text-zinc-300">
                     <Mic size={16} />
                     Your answer (live)
                   </div>
-                  <p className="text-sm text-teal-100/90 min-h-[3rem] whitespace-pre-wrap">
+                  <p className="min-h-[3rem] whitespace-pre-wrap text-sm text-zinc-200">
                     {timerPhase === 'answer' ? userLiveLine || '…' : '—'}
                   </p>
                   {timerPhase === 'answer' && userLiveLine && (
-                    <p className="text-xs text-teal-400/90 mt-2">
+                    <p className="mt-2 text-xs text-rose-300/80">
                       Fillers: {countFillers(userLiveLine)} · Pause gaps (~0.9s between speech bursts)
                     </p>
                   )}
@@ -820,39 +822,39 @@ export default function InterviewMode({ onBack }) {
             {/* Right: orb + controls */}
             <div className="w-full xl:w-[min(100%,380px)] xl:flex-shrink-0 flex flex-col items-center order-1 xl:order-2 xl:sticky xl:top-6">
               <div
-                className={`relative flex items-center justify-center w-52 h-52 sm:w-56 sm:h-56 rounded-full transition-all duration-700 ${
+                className={`relative flex h-52 w-52 items-center justify-center rounded-full transition-all duration-700 sm:h-56 sm:w-56 ${
                   orbActive
-                    ? 'shadow-[0_0_80px_rgba(129,140,248,0.55),0_0_120px_rgba(99,102,241,0.35)] scale-105 animate-pulse'
-                    : 'shadow-[0_0_40px_rgba(99,102,241,0.2)]'
+                    ? 'scale-105 animate-pulse shadow-[0_0_80px_rgba(244,63,94,0.45),0_0_120px_rgba(190,18,60,0.25)]'
+                    : 'shadow-[0_0_40px_rgba(244,63,94,0.15)]'
                 }`}
                 style={{
                   background: orbActive
-                    ? 'radial-gradient(circle at 30% 30%, rgba(199,210,254,0.35), rgba(79,70,229,0.5), rgba(30,27,75,0.95))'
+                    ? 'radial-gradient(circle at 30% 30%, rgba(254,205,211,0.35), rgba(225,29,72,0.45), rgba(30,10,20,0.95))'
                     : 'radial-gradient(circle at 30% 30%, rgba(148,163,184,0.2), rgba(51,65,85,0.6), rgba(15,23,42,0.95))',
                 }}
               >
                 <div
                   className={`absolute inset-4 rounded-full border-2 ${
-                    orbActive ? 'border-indigo-300/50' : 'border-white/10'
+                    orbActive ? 'border-rose-300/45' : 'border-white/10'
                   }`}
                 />
                 <div className="relative z-10 flex flex-col items-center gap-4 px-6 text-center">
-                  {busy && <Loader2 className="animate-spin text-indigo-200" size={28} />}
-                  {!busy && phase === 'idle' && <Mic className="text-indigo-200/80" size={32} />}
-                  {phase !== 'idle' && !busy && <Volume2 className="text-indigo-200/90" size={28} />}
+                  {busy && <Loader2 className="animate-spin text-rose-200" size={28} />}
+                  {!busy && phase === 'idle' && <Mic className="text-rose-200/80" size={32} />}
+                  {phase !== 'idle' && !busy && <Volume2 className="text-rose-200/90" size={28} />}
                   {phase === 'idle' && (
                     <button
                       type="button"
                       onClick={startInterview}
                       disabled={busy}
-                      className="rounded-full bg-indigo-500 hover:bg-indigo-400 text-white font-semibold px-6 py-3 text-sm shadow-lg shadow-indigo-500/30 disabled:opacity-50"
+                      className="rounded-full bg-gradient-to-r from-rose-600 to-red-600 px-6 py-3 text-sm font-semibold text-white shadow-lg shadow-rose-900/40 hover:from-rose-500 hover:to-red-500 disabled:opacity-50"
                     >
                       Start Interview
                     </button>
                   )}
                 </div>
               </div>
-              <p className="mt-5 text-center text-indigo-100/90 text-sm min-h-[2.5rem] px-2 max-w-xs">
+              <p className="mt-5 min-h-[2.5rem] max-w-xs px-2 text-center text-sm text-zinc-400">
                 {statusLine}
               </p>
             </div>
@@ -872,8 +874,8 @@ export default function InterviewMode({ onBack }) {
       {phase === 'done' && (
         <div className="w-full mt-8 space-y-6">
           <div className="rounded-2xl border border-white/10 bg-white/5 p-5 backdrop-blur-md">
-            <h2 className="text-white font-semibold flex items-center gap-2 mb-3">
-              <FileText size={20} className="text-indigo-300" />
+            <h2 className="mb-3 flex items-center gap-2 font-semibold text-white">
+              <FileText size={20} className="text-rose-400" />
               Your answers
             </h2>
             <ul className="space-y-3 text-sm text-slate-200 max-h-56 overflow-y-auto">
@@ -892,7 +894,7 @@ export default function InterviewMode({ onBack }) {
                     type="button"
                     disabled={replayBusy === i}
                     onClick={() => replayFeedback(u.content, i)}
-                    className="mt-2 inline-flex items-center gap-1.5 text-xs text-indigo-300 hover:text-indigo-100 disabled:opacity-50"
+                    className="mt-2 inline-flex items-center gap-1.5 text-xs text-rose-300 hover:text-rose-100 disabled:opacity-50"
                   >
                     {replayBusy === i ? (
                       <Loader2 className="animate-spin" size={14} />
@@ -907,7 +909,7 @@ export default function InterviewMode({ onBack }) {
             <button
               type="button"
               onClick={downloadTranscript}
-              className="mt-4 inline-flex items-center gap-2 text-sm text-indigo-200 hover:text-white"
+              className="mt-4 inline-flex items-center gap-2 text-sm text-zinc-400 hover:text-white"
             >
               <Download size={16} />
               Download transcript
@@ -923,7 +925,7 @@ export default function InterviewMode({ onBack }) {
               The coach uses your words plus timing/filler/pause signals from each answer to judge clarity and pacing.
             </p>
             {reportLoading ? (
-              <div className="flex items-center gap-2 text-indigo-200/80 text-sm">
+              <div className="flex items-center gap-2 text-sm text-zinc-400">
                 <Loader2 className="animate-spin" size={18} />
                 Generating report…
               </div>
@@ -936,7 +938,7 @@ export default function InterviewMode({ onBack }) {
               type="button"
               onClick={downloadReport}
               disabled={!reportMd}
-              className="mt-4 inline-flex items-center gap-2 rounded-lg bg-emerald-600/80 hover:bg-emerald-500 px-4 py-2 text-sm text-white disabled:opacity-40"
+              className="mt-4 inline-flex items-center gap-2 rounded-lg bg-gradient-to-r from-rose-600 to-red-600 px-4 py-2 text-sm text-white shadow-md shadow-rose-900/25 hover:from-rose-500 hover:to-red-500 disabled:opacity-40"
             >
               <Download size={16} />
               Download report
@@ -963,5 +965,6 @@ export default function InterviewMode({ onBack }) {
       )}
       </div>
     </div>
+    </RippleBackground>
   );
 }

@@ -1,5 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { ArrowLeft, Mic, Sparkles } from 'lucide-react';
+import RippleBackground from './RippleBackground';
 
 const CONVAI_SCRIPT = 'https://unpkg.com/@elevenlabs/convai-widget-embed';
 const DEFAULT_AGENT_ID =
@@ -136,21 +137,22 @@ export default function UnpanicMode({ onBack }) {
   }, [mountWidget]);
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-violet-950/40 to-slate-900 px-4 py-8 flex flex-col items-center">
-      <div className="w-full max-w-lg flex justify-between items-center mb-8">
+    <RippleBackground>
+    <div className="flex min-h-screen flex-col items-center px-4 pb-12 pt-16">
+      <div className="mb-8 flex w-full max-w-lg items-center justify-between">
         <button
           type="button"
           onClick={onBack}
-          className="inline-flex items-center gap-2 text-violet-200/90 hover:text-white text-sm"
+          className="inline-flex items-center gap-2 text-sm text-zinc-400 hover:text-white"
         >
           <ArrowLeft size={18} />
           Modes
         </button>
-        <span className="text-xs text-violet-300/80 uppercase tracking-wider">Unpanic me</span>
+        <span className="text-xs uppercase tracking-wider text-zinc-500">Unpanic me</span>
       </div>
 
-      <div className="flex flex-col items-center justify-center flex-1 w-full max-w-sm">
-        <p className="text-center text-slate-400 text-sm mb-6 max-w-xs">
+      <div className="flex w-full max-w-sm flex-1 flex-col items-center justify-center">
+        <p className="mb-6 max-w-xs text-center text-sm text-zinc-500">
           {callStarted
             ? 'Zariya is listening. Speak whenever you\'re ready.'
             : 'Talk with your Zariya agent. Starting your session…'}
@@ -158,37 +160,36 @@ export default function UnpanicMode({ onBack }) {
 
         {/* Phone frame */}
         <div
-          className="relative w-full max-w-[360px] rounded-[2.5rem] border-4 border-slate-700/80 bg-slate-900 shadow-2xl shadow-violet-950/50 overflow-hidden"
+          className="relative w-full max-w-[360px] overflow-hidden rounded-[2.5rem] border-4 border-white/10 bg-zinc-950 shadow-2xl shadow-black/50"
           style={{ paddingBottom: 'env(safe-area-inset-bottom, 0)' }}
         >
           {/* Notch */}
-          <div className="h-7 bg-slate-900 flex justify-center items-end pb-1">
-            <div className="w-24 h-5 rounded-full bg-black/80" />
+          <div className="flex h-7 items-end justify-center bg-black/60 pb-1">
+            <div className="h-5 w-24 rounded-full bg-black/80" />
           </div>
 
-          <div className="px-4 pt-4 pb-6 bg-gradient-to-b from-slate-900 to-slate-950 min-h-[520px] flex flex-col">
-            <div className="flex items-center justify-center gap-2 text-violet-200/90 text-sm font-medium mb-4">
+          <div className="flex min-h-[520px] flex-col bg-gradient-to-b from-zinc-950 to-black px-4 pb-6 pt-4">
+            <div className="mb-4 flex items-center justify-center gap-2 text-sm font-medium text-rose-200/90">
               <Sparkles size={16} />
               Zariya · Unpanic
             </div>
 
             {/* Orb — always visible, pulses faster once call has started */}
-            <div className="flex justify-center mb-6">
+            <div className="mb-6 flex justify-center">
               <div
-                className={`relative flex items-center justify-center w-28 h-28 rounded-full shadow-[0_0_50px_rgba(167,139,250,0.45)] ${
+                className={`relative flex h-28 w-28 items-center justify-center rounded-full shadow-[0_0_50px_rgba(244,63,94,0.35)] ${
                   callStarted ? 'animate-ping-slow' : 'animate-pulse'
                 }`}
                 style={{
                   background:
-                    'radial-gradient(circle at 30% 30%, rgba(221,214,254,0.35), rgba(109,40,217,0.55), rgba(30,27,75,0.95))',
-                  // Faster pulse when active
+                    'radial-gradient(circle at 30% 30%, rgba(254,205,211,0.35), rgba(190,18,60,0.5), rgba(30,10,18,0.95))',
                   animationDuration: callStarted ? '1.2s' : '2s',
                 }}
               >
-                <div className="absolute inset-3 rounded-full border border-violet-300/40" />
+                <div className="absolute inset-3 rounded-full border border-rose-300/35" />
                 <Mic
                   className={`relative z-10 transition-colors duration-500 ${
-                    callStarted ? 'text-white' : 'text-violet-100'
+                    callStarted ? 'text-white' : 'text-rose-100'
                   }`}
                   size={36}
                 />
@@ -213,11 +214,12 @@ export default function UnpanicMode({ onBack }) {
           </div>
         </div>
 
-        <p className="mt-6 text-center text-xs text-slate-500 max-w-xs">
-          Agent ID is set via <code className="text-violet-400">REACT_APP_ELEVENLABS_CONVAI_AGENT_ID</code> or
+        <p className="mt-6 max-w-xs text-center text-xs text-zinc-600">
+          Agent ID is set via <code className="text-rose-400/90">REACT_APP_ELEVENLABS_CONVAI_AGENT_ID</code> or
           defaults to your ElevenLabs agent.
         </p>
       </div>
     </div>
+    </RippleBackground>
   );
 }

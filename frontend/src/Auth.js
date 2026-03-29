@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
-import { LogIn, UserPlus, Mail, Lock, User, AlertCircle, Loader2 } from 'lucide-react';
+import { LogIn, UserPlus, Mail, Lock, User, AlertCircle, Loader2, ArrowRight } from 'lucide-react';
 import { registerUser, loginUser, saveAuth } from './api';
+import RippleBackground from './RippleBackground';
 
 export default function Auth({ onAuthenticated }) {
   const [mode, setMode] = useState('login');
@@ -32,150 +33,180 @@ export default function Auth({ onAuthenticated }) {
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 flex items-center justify-center p-4 sm:p-8">
-      <div className="w-full max-w-md">
-        <div className="text-center mb-8">
-          <div className="inline-flex bg-gradient-to-r from-blue-500 to-green-600 p-4 rounded-2xl mb-4">
-            {mode === 'login' ? (
-              <LogIn size={40} className="text-white" />
-            ) : (
-              <UserPlus size={40} className="text-white" />
-            )}
-          </div>
-          <h1 className="text-3xl sm:text-4xl font-bold text-white mb-2">Zariya</h1>
-          <p className="text-gray-400 text-sm">
-            {mode === 'login' ? 'Sign in to continue' : 'Create an account'}
-          </p>
-        </div>
-
-        <div className="bg-white/10 backdrop-blur-xl rounded-2xl border border-white/20 p-6 sm:p-8 shadow-2xl">
-          <div className="flex rounded-lg bg-black/30 p-1 mb-6">
-            <button
-              type="button"
-              onClick={() => {
-                setMode('login');
-                setError('');
-              }}
-              className={`flex-1 py-2.5 rounded-md text-sm font-medium transition-all ${
-                mode === 'login'
-                  ? 'bg-gradient-to-r from-blue-500 to-green-600 text-white shadow'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              Log in
-            </button>
-            <button
-              type="button"
-              onClick={() => {
-                setMode('register');
-                setError('');
-              }}
-              className={`flex-1 py-2.5 rounded-md text-sm font-medium transition-all ${
-                mode === 'register'
-                  ? 'bg-gradient-to-r from-blue-500 to-green-600 text-white shadow'
-                  : 'text-gray-400 hover:text-white'
-              }`}
-            >
-              Register
-            </button>
-          </div>
-
-          {error && (
-            <div className="mb-4 flex items-start gap-2 rounded-lg border border-red-500/50 bg-red-900/30 px-3 py-2 text-sm text-red-200">
-              <AlertCircle className="mt-0.5 flex-shrink-0" size={18} />
-              <span>{error}</span>
+    <RippleBackground>
+      <div className="flex min-h-screen flex-col">
+        <header className="relative z-20 flex items-center justify-between px-6 py-5 sm:px-10">
+          <div className="flex items-center gap-3">
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-gradient-to-br from-rose-600 to-red-700 shadow-lg shadow-rose-900/40">
+              <span className="font-display text-sm font-bold text-white">Z</span>
             </div>
-          )}
+            <span className="font-display text-lg font-semibold tracking-tight text-white">Zariya</span>
+          </div>
+          <a
+            href="#auth-form"
+            className="group hidden items-center gap-2 text-sm text-zinc-400 transition-colors hover:text-white sm:inline-flex"
+          >
+            Get started
+            <ArrowRight size={16} className="transition-transform group-hover:translate-x-0.5" />
+          </a>
+        </header>
 
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {mode === 'register' && (
-              <div>
-                <label className="block text-gray-300 text-sm font-medium mb-1.5">Name</label>
-                <div className="relative">
-                  <User
-                    className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"
-                    size={18}
-                  />
-                  <input
-                    type="text"
-                    value={name}
-                    onChange={(e) => setName(e.target.value)}
-                    autoComplete="name"
-                    placeholder="Your name"
-                    className="w-full pl-10 pr-4 py-3 rounded-lg bg-white/10 border border-white/20 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  />
+        <div className="flex flex-1 flex-col items-center justify-center px-4 pb-16 pt-4 sm:px-8">
+          <div id="auth-form" className="w-full max-w-[420px]">
+            <div className="mb-8 text-center sm:mb-10">
+              <h1 className="font-display text-4xl font-bold tracking-tight text-white sm:text-5xl">
+                Speech clarity,
+                <br />
+                <span className="bg-gradient-to-r from-zinc-100 via-white to-zinc-400 bg-clip-text text-transparent">
+                  reimagined
+                </span>
+              </h1>
+              <p className="mx-auto mt-4 max-w-sm text-sm leading-relaxed text-zinc-400">
+                Lip-reading practice, emotion-aware sessions, and voice-guided modes — sign in to continue.
+              </p>
+            </div>
+
+            <div className="rounded-2xl border border-white/[0.12] bg-white/[0.06] p-6 shadow-[0_24px_80px_rgba(0,0,0,0.45)] backdrop-blur-2xl sm:p-8">
+              <div className="mb-6 flex rounded-xl bg-black/30 p-1">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('login');
+                    setError('');
+                  }}
+                  className={`relative flex-1 rounded-lg py-2.5 text-sm font-medium transition-colors ${
+                    mode === 'login' ? 'text-white' : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  {mode === 'login' && (
+                    <span className="absolute inset-0 rounded-lg bg-white/10 shadow-inner" />
+                  )}
+                  <span className="relative">Log in</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setMode('register');
+                    setError('');
+                  }}
+                  className={`relative flex-1 rounded-lg py-2.5 text-sm font-medium transition-colors ${
+                    mode === 'register' ? 'text-white' : 'text-zinc-500 hover:text-zinc-300'
+                  }`}
+                >
+                  {mode === 'register' && (
+                    <span className="absolute inset-0 rounded-lg bg-white/10 shadow-inner" />
+                  )}
+                  <span className="relative">Register</span>
+                </button>
+              </div>
+
+              {error && (
+                <div className="mb-4 flex items-start gap-2 rounded-xl border border-red-500/35 bg-red-950/40 px-3 py-2.5 text-sm text-red-200">
+                  <AlertCircle className="mt-0.5 flex-shrink-0" size={18} />
+                  <span>{error}</span>
                 </div>
-              </div>
-            )}
-
-            <div>
-              <label className="block text-gray-300 text-sm font-medium mb-1.5">Email</label>
-              <div className="relative">
-                <Mail
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"
-                  size={18}
-                />
-                <input
-                  type="email"
-                  required
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
-                  autoComplete="email"
-                  placeholder="you@example.com"
-                  className="w-full pl-10 pr-4 py-3 rounded-lg bg-white/10 border border-white/20 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-            </div>
-
-            <div>
-              <label className="block text-gray-300 text-sm font-medium mb-1.5">Password</label>
-              <div className="relative">
-                <Lock
-                  className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-500"
-                  size={18}
-                />
-                <input
-                  type="password"
-                  required
-                  minLength={mode === 'register' ? 8 : undefined}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
-                  placeholder={mode === 'register' ? 'At least 8 characters' : '••••••••'}
-                  className="w-full pl-10 pr-4 py-3 rounded-lg bg-white/10 border border-white/20 text-white placeholder-gray-500 focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-            </div>
-
-            <button
-              type="submit"
-              disabled={loading}
-              className="w-full flex items-center justify-center gap-2 py-3 rounded-lg font-medium text-white bg-gradient-to-r from-blue-500 to-green-600 hover:from-blue-600 hover:to-green-700 disabled:opacity-60 disabled:cursor-not-allowed shadow-lg transition-all"
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="animate-spin" size={20} />
-                  Please wait
-                </>
-              ) : mode === 'login' ? (
-                <>
-                  <LogIn size={20} />
-                  Sign in
-                </>
-              ) : (
-                <>
-                  <UserPlus size={20} />
-                  Create account
-                </>
               )}
-            </button>
-          </form>
-        </div>
 
-        <p className="text-center text-gray-500 text-xs mt-6">
-          Accounts are stored on the Zariya server for this demo. Use a strong password.
-        </p>
+              <form onSubmit={handleSubmit} className="space-y-4">
+                {mode === 'register' && (
+                  <div>
+                    <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-zinc-500">
+                      Name
+                    </label>
+                    <div className="relative">
+                      <User
+                        className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
+                        size={18}
+                      />
+                      <input
+                        type="text"
+                        value={name}
+                        onChange={(e) => setName(e.target.value)}
+                        autoComplete="name"
+                        placeholder="Your name"
+                        className="w-full rounded-xl border border-white/10 bg-black/25 py-3 pl-10 pr-4 text-white placeholder-zinc-600 outline-none ring-rose-500/0 transition-shadow focus:ring-2 focus:ring-rose-500/50"
+                      />
+                    </div>
+                  </div>
+                )}
+
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-zinc-500">
+                    Email
+                  </label>
+                  <div className="relative">
+                    <Mail
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
+                      size={18}
+                    />
+                    <input
+                      type="email"
+                      required
+                      value={email}
+                      onChange={(e) => setEmail(e.target.value)}
+                      autoComplete="email"
+                      placeholder="you@example.com"
+                      className="w-full rounded-xl border border-white/10 bg-black/25 py-3 pl-10 pr-4 text-white placeholder-zinc-600 outline-none transition-shadow focus:ring-2 focus:ring-rose-500/50"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-zinc-500">
+                    Password
+                  </label>
+                  <div className="relative">
+                    <Lock
+                      className="absolute left-3 top-1/2 -translate-y-1/2 text-zinc-500"
+                      size={18}
+                    />
+                    <input
+                      type="password"
+                      required
+                      minLength={mode === 'register' ? 8 : undefined}
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      autoComplete={mode === 'register' ? 'new-password' : 'current-password'}
+                      placeholder={mode === 'register' ? 'At least 8 characters' : '••••••••'}
+                      className="w-full rounded-xl border border-white/10 bg-black/25 py-3 pl-10 pr-4 text-white placeholder-zinc-600 outline-none transition-shadow focus:ring-2 focus:ring-rose-500/50"
+                    />
+                  </div>
+                </div>
+
+                <button
+                  type="submit"
+                  disabled={loading}
+                  className="group relative mt-2 w-full overflow-hidden rounded-xl bg-gradient-to-r from-rose-600 to-red-600 py-3.5 font-semibold text-white shadow-lg shadow-rose-900/30 transition hover:from-rose-500 hover:to-red-500 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  <span className="absolute inset-0 bg-gradient-to-r from-white/0 via-white/10 to-white/0 opacity-0 transition group-hover:opacity-100" />
+                  <span className="relative flex items-center justify-center gap-2">
+                    {loading ? (
+                      <>
+                        <Loader2 className="animate-spin" size={20} />
+                        Please wait
+                      </>
+                    ) : mode === 'login' ? (
+                      <>
+                        <LogIn size={20} />
+                        Sign in
+                      </>
+                    ) : (
+                      <>
+                        <UserPlus size={20} />
+                        Create account
+                      </>
+                    )}
+                  </span>
+                </button>
+              </form>
+            </div>
+
+            <p className="mt-6 text-center text-xs text-zinc-600">
+              Demo accounts live on the Zariya server — use a strong password.
+            </p>
+          </div>
+        </div>
       </div>
-    </div>
+    </RippleBackground>
   );
 }

@@ -1,10 +1,10 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { Mail, Camera, Square, Mic, Volume2, AlertCircle, Activity, Zap, Heart, FileText, Download, Stethoscope, Clock, Award, LogOut, Loader2, ListChecks, ArrowLeft, Lightbulb } from 'lucide-react';
-import ZariyaLandingPage from './home';
 import ModeSelect from './ModeSelect';
 import InterviewMode from './InterviewMode';
 import UnpanicMode from './UnpanicMode';
 import Auth from './Auth';
+import RippleBackground from './RippleBackground';
 import { API_BASE, loadStoredAuth, clearAuth, fetchMe } from './api';
 
 // How often we POST a video frame to /process_frame. Larger = slower buffer fill → longer before each prediction (pairs with backend ZARIYA_FRAME_BUFFER_SIZE).
@@ -126,7 +126,6 @@ function buildStructuredReportData({
 export default function MedicalLipReadingApp() {
   const [authSession, setAuthSession] = useState(null);
   const [authChecking, setAuthChecking] = useState(true);
-  const [showLanding, setShowLanding] = useState(true);
   /** null = show mode picker; 1–3 = placeholders; 4 = live practise (existing flow). */
   const [selectedAppMode, setSelectedAppMode] = useState(null);
   
@@ -798,9 +797,15 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
 
   if (authChecking) {
     return (
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 flex items-center justify-center">
-        <Loader2 className="animate-spin text-blue-400" size={48} />
-      </div>
+      <RippleBackground>
+        <div className="flex min-h-screen flex-col items-center justify-center gap-4">
+          <div className="relative">
+            <div className="absolute inset-0 animate-ping rounded-full bg-rose-500/20" />
+            <Loader2 className="relative animate-spin text-rose-400" size={40} strokeWidth={1.5} />
+          </div>
+          <p className="text-sm text-zinc-500">Loading…</p>
+        </div>
+      </RippleBackground>
     );
   }
 
@@ -809,15 +814,15 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
   }
 
   const authBar = (
-    <div className="fixed top-4 right-4 z-50 flex items-center gap-2 rounded-lg bg-black/40 backdrop-blur-md border border-white/20 px-3 py-2">
-      <span className="text-gray-300 text-sm max-w-[180px] truncate hidden sm:inline">
+    <div className="fixed top-4 right-4 z-50 flex items-center gap-1 rounded-xl border border-white/10 bg-black/50 px-2 py-1.5 shadow-lg shadow-black/40 backdrop-blur-xl sm:gap-2 sm:px-3 sm:py-2">
+      <span className="hidden max-w-[160px] truncate text-xs text-zinc-400 sm:inline sm:text-sm">
         {authSession.user?.name || authSession.user?.email}
       </span>
       {(selectedAppMode === 4 || selectedAppMode === 1 || selectedAppMode === 2) && (
         <button
           type="button"
           onClick={goToModeSelect}
-          className="flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-white hover:bg-white/10"
+          className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-zinc-200 transition-colors hover:bg-white/10 hover:text-white sm:text-sm"
         >
           <ArrowLeft size={16} />
           <span className="hidden sm:inline">Modes</span>
@@ -828,25 +833,15 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
         onClick={() => {
           clearAuth();
           setAuthSession(null);
-          setShowLanding(true);
           setSelectedAppMode(null);
         }}
-        className="flex items-center gap-1.5 rounded-md px-2 py-1 text-sm text-white hover:bg-white/10"
+        className="flex items-center gap-1.5 rounded-lg px-2 py-1.5 text-xs text-zinc-200 transition-colors hover:bg-white/10 hover:text-white sm:text-sm"
       >
         <LogOut size={16} />
         <span className="hidden sm:inline">Log out</span>
       </button>
     </div>
   );
-
-  if (showLanding) {
-    return (
-      <>
-        {authBar}
-        <ZariyaLandingPage onComplete={() => setShowLanding(false)} />
-      </>
-    );
-  }
 
   if (selectedAppMode === null) {
     return (
@@ -867,63 +862,64 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
     return (
       <>
         {authBar}
-      <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 p-4 sm:p-8">
-        <div className="max-w-3xl mx-auto">
-          <div className="bg-white/10 backdrop-blur-md rounded-xl shadow-2xl border border-white/20 p-6 sm:p-8">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
+      <RippleBackground>
+      <div className="min-h-screen p-4 pb-12 pt-20 sm:p-8">
+        <div className="mx-auto max-w-3xl">
+          <div className="rounded-xl border border-white/10 bg-white/[0.06] p-6 shadow-2xl shadow-black/40 backdrop-blur-xl sm:p-8">
+            <div className="mb-8 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
               <div className="flex items-center gap-3">
-                <div className="bg-gradient-to-r from-indigo-500 to-violet-600 p-3 rounded-2xl">
+                <div className="rounded-2xl bg-gradient-to-r from-rose-600 to-red-600 p-3 shadow-lg shadow-rose-900/30">
                   <FileText size={28} className="text-white" />
                 </div>
                 <div>
-                  <h1 className="text-2xl sm:text-3xl font-bold text-white">Session report</h1>
-                  <p className="text-gray-400 text-sm">{new Date().toLocaleString()}</p>
+                  <h1 className="font-display text-2xl font-bold text-white sm:text-3xl">Session report</h1>
+                  <p className="text-sm text-zinc-500">{new Date().toLocaleString()}</p>
                 </div>
               </div>
               <button
                 type="button"
                 onClick={() => setShowReport(false)}
-                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white text-sm font-medium"
+                className="rounded-lg bg-gradient-to-r from-rose-600 to-red-600 px-4 py-2 text-sm font-medium text-white shadow-md shadow-rose-900/25 hover:from-rose-500 hover:to-red-500"
               >
                 New session
               </button>
             </div>
 
-            <div className="bg-white/5 rounded-xl p-5 mb-6 border border-white/10">
-              <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">Patient</h2>
-              <div className="grid sm:grid-cols-2 gap-4">
+            <div className="mb-6 rounded-xl border border-white/10 bg-black/20 p-5">
+              <h2 className="mb-3 text-xs font-semibold uppercase tracking-wide text-zinc-500">Patient</h2>
+              <div className="grid gap-4 sm:grid-cols-2">
                 <div>
-                  <label className="text-gray-500 text-xs">Name</label>
+                  <label className="text-xs text-zinc-500">Name</label>
                   <input
                     type="text"
                     value={patientName}
                     onChange={(e) => setPatientName(e.target.value)}
                     placeholder="Optional"
-                    className="w-full mt-1 px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white text-sm"
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-white placeholder-zinc-600"
                   />
                 </div>
                 <div>
-                  <label className="text-gray-500 text-xs">ID</label>
+                  <label className="text-xs text-zinc-500">ID</label>
                   <input
                     type="text"
                     value={patientId}
                     onChange={(e) => setPatientId(e.target.value)}
                     placeholder="Optional"
-                    className="w-full mt-1 px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white text-sm"
+                    className="mt-1 w-full rounded-lg border border-white/10 bg-black/30 px-3 py-2 text-sm text-white placeholder-zinc-600"
                   />
                 </div>
               </div>
             </div>
 
-            <div className="rounded-2xl border border-indigo-500/30 bg-gradient-to-br from-indigo-500/15 to-slate-900/40 p-6 mb-6 text-center">
-              <p className="text-gray-400 text-sm mb-1">1) Overall score</p>
-              <p className="text-5xl font-bold text-white tabular-nums">
+            <div className="mb-6 rounded-2xl border border-rose-500/25 bg-gradient-to-br from-rose-500/10 to-black/40 p-6 text-center">
+              <p className="mb-1 text-sm text-zinc-500">1) Overall score</p>
+              <p className="text-5xl font-bold tabular-nums text-white">
                 {report.overall_score != null ? report.overall_score : '—'}
               </p>
-              <p className="text-xs text-gray-500 mt-2">
+              <p className="mt-2 text-xs text-zinc-500">
                 From DTW lip-template similarity (0–100)
                 {sessionAvgDtw != null && (
-                  <span className="block text-indigo-300/90 mt-1">
+                  <span className="mt-1 block text-rose-300/90">
                     Running session average: {sessionAvgDtw}
                   </span>
                 )}
@@ -931,14 +927,14 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
             </div>
 
             <div className="mb-6">
-              <h2 className="text-white font-semibold mb-3 flex items-center gap-2">
+              <h2 className="mb-3 flex items-center gap-2 font-semibold text-white">
                 <ListChecks size={18} className="text-amber-400" />
                 2) Sentence results
               </h2>
-              <div className="rounded-xl border border-white/10 overflow-hidden">
+              <div className="overflow-hidden rounded-xl border border-white/10">
                 <table className="w-full text-sm">
                   <thead>
-                    <tr className="bg-white/5 text-left text-gray-400 text-xs uppercase">
+                    <tr className="bg-white/5 text-left text-xs uppercase text-zinc-500">
                       <th className="px-4 py-2 font-medium">Sentence</th>
                       <th className="px-4 py-2 font-medium w-10">×</th>
                       <th className="px-4 py-2 font-medium w-14">Score</th>
@@ -948,7 +944,7 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
                   <tbody>
                     {(report.sentence_results || []).length === 0 ? (
                       <tr>
-                        <td colSpan={4} className="px-4 py-6 text-center text-gray-500">
+                        <td colSpan={4} className="px-4 py-6 text-center text-zinc-500">
                           No sentences matched this session
                         </td>
                       </tr>
@@ -956,8 +952,8 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
                       (report.sentence_results || []).map((row) => (
                         <tr key={row.text} className="border-t border-white/10">
                           <td className="px-4 py-3 text-white">{row.text}</td>
-                          <td className="px-4 py-3 text-gray-300 tabular-nums">{row.count}</td>
-                          <td className="px-4 py-3 text-gray-200 tabular-nums">
+                          <td className="px-4 py-3 tabular-nums text-zinc-400">{row.count}</td>
+                          <td className="px-4 py-3 tabular-nums text-zinc-300">
                             {row.score != null ? row.score : '—'}
                           </td>
                           <td className="px-4 py-3">
@@ -968,7 +964,7 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
                                   : row.label === 'Okay'
                                   ? 'bg-amber-500/20 text-amber-200'
                                   : row.label === '—'
-                                  ? 'bg-white/10 text-gray-400'
+                                  ? 'bg-white/10 text-zinc-500'
                                   : 'bg-rose-500/20 text-rose-200'
                               }`}
                             >
@@ -983,56 +979,56 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
               </div>
             </div>
 
-            <div className="bg-white/5 rounded-xl p-5 mb-6 border border-white/10">
-              <h2 className="text-white font-semibold mb-3 flex items-center gap-2">
-                <Zap size={18} className="text-yellow-400" />
+            <div className="mb-6 rounded-xl border border-white/10 bg-black/20 p-5">
+              <h2 className="mb-3 flex items-center gap-2 font-semibold text-white">
+                <Zap size={18} className="text-amber-400" />
                 3) Key feedback
               </h2>
-              <ul className="space-y-2 text-gray-300 text-sm">
+              <ul className="space-y-2 text-sm text-zinc-400">
                 {(report.key_feedback || []).map((line, i) => (
                   <li key={i} className="flex gap-2">
-                    <span className="text-indigo-400">•</span>
+                    <span className="text-rose-400/90">•</span>
                     <span>{line}</span>
                   </li>
                 ))}
               </ul>
             </div>
 
-            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-5 mb-6">
-              <h2 className="text-emerald-200 font-semibold mb-2 flex items-center gap-2">
+            <div className="mb-6 rounded-xl border border-rose-500/25 bg-rose-950/20 p-5">
+              <h2 className="mb-2 flex items-center gap-2 font-semibold text-rose-200">
                 <Award size={18} />
                 4) Best attempt
               </h2>
               {report.best_attempt ? (
                 <>
-                  <p className="text-white text-lg font-medium">{report.best_attempt.text}</p>
-                  <p className="text-emerald-300/90 text-sm mt-1">
+                  <p className="text-lg font-medium text-white">{report.best_attempt.text}</p>
+                  <p className="mt-1 text-sm text-rose-300/90">
                     Score {report.best_attempt.score}/100
                   </p>
                 </>
               ) : (
-                <p className="text-gray-500 text-sm">No scored attempts yet</p>
+                <p className="text-sm text-zinc-500">No scored attempts yet</p>
               )}
             </div>
 
-            <div className="bg-white/5 rounded-xl p-5 mb-6 border border-white/10">
-              <h2 className="text-white font-semibold mb-3 flex items-center gap-2">
-                <Heart size={18} className="text-pink-400" />
+            <div className="mb-6 rounded-xl border border-white/10 bg-black/20 p-5">
+              <h2 className="mb-3 flex items-center gap-2 font-semibold text-white">
+                <Heart size={18} className="text-rose-400" />
                 Emotions (overview)
               </h2>
-              <p className="text-gray-300 text-sm mb-2">
+              <p className="mb-2 text-sm text-zinc-400">
                 Dominant:{' '}
-                <span className="text-white capitalize">{report.dominantEmotion}</span>{' '}
+                <span className="capitalize text-white">{report.dominantEmotion}</span>{' '}
                 {EMOTION_EMOTICONS[report.dominantEmotion]}
-                <span className="text-gray-500 text-xs ml-2">
+                <span className="ml-2 text-xs text-zinc-500">
                   ({report.avgConfidence}% avg confidence)
                 </span>
               </p>
-              <div className="flex flex-wrap gap-2 mt-2">
+              <div className="mt-2 flex flex-wrap gap-2">
                 {Object.entries(report.emotionCounts).map(([emotion, count]) => (
                   <span
                     key={emotion}
-                    className="text-xs px-2 py-1 rounded-full bg-white/10 text-gray-300 capitalize"
+                    className="rounded-full bg-white/10 px-2 py-1 text-xs capitalize text-zinc-300"
                   >
                     {emotion} {EMOTION_EMOTICONS[emotion]} {count}
                   </span>
@@ -1040,24 +1036,24 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
               </div>
             </div>
 
-            <div className="bg-white/5 rounded-xl p-5 mb-6 border border-white/10">
-              <h2 className="text-white font-semibold mb-3 flex items-center gap-2">
-                <Stethoscope size={18} className="text-sky-400" />
+            <div className="mb-6 rounded-xl border border-white/10 bg-black/20 p-5">
+              <h2 className="mb-3 flex items-center gap-2 font-semibold text-white">
+                <Stethoscope size={18} className="text-rose-300" />
                 Clinical notes
               </h2>
               <textarea
                 value={sessionNotes}
                 onChange={(e) => setSessionNotes(e.target.value)}
                 placeholder="Observations or recommendations…"
-                className="w-full h-28 px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-500 resize-none text-sm"
+                className="h-28 w-full resize-none rounded-lg border border-white/10 bg-black/30 px-4 py-3 text-sm text-white placeholder-zinc-600"
               />
             </div>
 
-            <div className="flex flex-col sm:flex-row gap-3">
+            <div className="flex flex-col gap-3 sm:flex-row">
               <button
                 type="button"
                 onClick={downloadReport}
-                className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 rounded-lg text-white font-medium"
+                className="flex flex-1 items-center justify-center gap-2 rounded-lg bg-gradient-to-r from-rose-600 to-red-600 px-6 py-3 font-medium text-white shadow-md shadow-rose-900/25 hover:from-rose-500 hover:to-red-500"
               >
                 <Download size={20} />
                 Download report
@@ -1065,7 +1061,7 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
               <button
                 type="button"
                 onClick={handleEmailReport}
-                className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 rounded-lg text-white font-medium"
+                className="flex flex-1 items-center justify-center gap-2 rounded-lg border border-white/15 bg-white/10 px-6 py-3 font-medium text-white hover:bg-white/15"
               >
                 <Mail size={20} />
                 Email report
@@ -1080,7 +1076,7 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
                   setSessionDtwScores([]);
                   setLastDtwScore(null);
                 }}
-                className="px-6 py-3 bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg text-white font-medium"
+                className="rounded-lg border border-white/15 bg-transparent px-6 py-3 font-medium text-zinc-300 hover:bg-white/5 hover:text-white"
               >
                 Close
               </button>
@@ -1088,6 +1084,7 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
           </div>
         </div>
       </div>
+      </RippleBackground>
       </>
     );
   }
@@ -1114,20 +1111,22 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
     return (
       <>
         {authBar}
-        <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 p-4 sm:p-8 flex flex-col items-center justify-center">
-          <div className="max-w-lg text-center px-4">
-            <h1 className="text-2xl font-bold text-white mb-2">Coming soon</h1>
-            <p className="text-gray-400 mb-6">This mode is not available yet. Check back later.</p>
-            <button
-              type="button"
-              onClick={() => setSelectedAppMode(null)}
-              className="inline-flex items-center gap-2 px-4 py-2 rounded-lg bg-white/10 hover:bg-white/20 text-white border border-white/20"
-            >
-              <ArrowLeft size={18} />
-              Back to modes
-            </button>
+        <RippleBackground>
+          <div className="flex min-h-screen flex-col items-center justify-center p-4 pt-20 sm:p-8">
+            <div className="max-w-lg px-4 text-center">
+              <h1 className="font-display mb-2 text-2xl font-bold text-white">Coming soon</h1>
+              <p className="mb-6 text-zinc-500">This mode is not available yet. Check back later.</p>
+              <button
+                type="button"
+                onClick={() => setSelectedAppMode(null)}
+                className="inline-flex items-center gap-2 rounded-xl border border-white/15 bg-white/10 px-4 py-2.5 text-white transition hover:bg-white/15"
+              >
+                <ArrowLeft size={18} />
+                Back to modes
+              </button>
+            </div>
           </div>
-        </div>
+        </RippleBackground>
       </>
     );
   }
@@ -1135,21 +1134,20 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
   return (
     <>
       {authBar}
-    <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 p-4 sm:p-8">
-      <div className="max-w-7xl mx-auto">
+    <RippleBackground>
+    <div className="min-h-screen p-4 pb-12 pt-20 sm:p-8">
+      <div className="mx-auto max-w-7xl">
 
-        <div className="text-center mb-8">
-          <div className="flex items-center justify-center gap-3 mb-4">
-            <div className="bg-gradient-to-r from-blue-500 to-green-600 p-3 rounded-2xl">
+        <div className="mb-8 text-center">
+          <div className="mb-4 flex items-center justify-center gap-3">
+            <div className="rounded-2xl bg-gradient-to-r from-rose-600 to-red-600 p-3 shadow-lg shadow-rose-900/30">
               <Stethoscope size={32} className="text-white" />
             </div>
-            <h1 className="text-4xl sm:text-5xl font-bold text-white">
+            <h1 className="font-display text-4xl font-bold text-white sm:text-5xl">
               Zariya
             </h1>
           </div>
-          <p className="text-gray-300 text-lg">Your Speech Training Assistant </p>
-          <p className="text-gray-400 text-sm mt-2">
-          </p>
+          <p className="text-lg text-zinc-400">Your speech training assistant</p>
         </div>
 
         {errorMsg && (
@@ -1174,28 +1172,28 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
           </div>
         )}
 
-        <div className="bg-white/10 backdrop-blur-md rounded-xl shadow-2xl border border-white/20 p-4 mb-6">
-          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 mb-4">
+        <div className="mb-6 rounded-xl border border-white/10 bg-white/[0.06] p-4 shadow-xl backdrop-blur-md">
+          <div className="mb-4 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
             <div className="flex flex-wrap items-center gap-4">
               <div className="flex items-center gap-2">
-                <div className={`w-3 h-3 rounded-full ${statusColor} animate-pulse`} />
+                <div className={`h-3 w-3 animate-pulse rounded-full ${statusColor}`} />
                 <span className="text-sm font-medium text-white">{statusText}</span>
               </div>
               <div className="flex items-center gap-2">
-                <div className={`w-3 h-3 rounded-full ${faceDetected ? 'bg-green-500' : 'bg-gray-500'}`} />
+                <div className={`h-3 w-3 rounded-full ${faceDetected ? 'bg-emerald-500' : 'bg-zinc-600'}`} />
                 <span className="text-sm font-medium text-white">{faceDetected ? '👤 Face' : '⌀ No Face'}</span>
               </div>
               <div className="flex items-center gap-2">
-                <Activity className="text-blue-400" size={16} />
+                <Activity className="text-rose-400" size={16} />
                 <span className="text-sm font-medium text-white">Buffer: {bufferStatus}</span>
               </div>
               {isStreaming && (
                 <>
                   <div className="flex items-center gap-2">
-                    <Clock className="text-yellow-400" size={16} />
+                    <Clock className="text-amber-400" size={16} />
                     <span className="text-sm font-medium text-white">{formatDuration(sessionDuration)}</span>
                   </div>
-                  <div className="flex items-center gap-2 bg-gradient-to-r from-purple-500/30 to-pink-500/30 px-3 py-1 rounded-full border border-purple-400/30">
+                  <div className="flex items-center gap-2 rounded-full border border-rose-500/25 bg-rose-950/30 px-3 py-1">
                     <span className="text-3xl animate-pulse">{EMOTION_EMOTICONS[currentEmotion]}</span>
                     <div>
                       <span className="text-sm font-bold text-white capitalize">{currentEmotion}</span>
@@ -1226,10 +1224,10 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
               </button>
               <button
                 onClick={toggleCamera}
-                className={`flex items-center gap-2 px-6 py-2 rounded-lg font-medium transition-all transform hover:scale-105 ${
+                className={`flex transform items-center gap-2 rounded-lg px-6 py-2 font-medium transition-all hover:scale-[1.02] ${
                   isStreaming 
-                    ? 'bg-red-500 hover:bg-red-600 text-white shadow-lg shadow-red-500/50' 
-                    : 'bg-gradient-to-r from-blue-500 to-green-600 hover:from-blue-600 hover:to-green-700 text-white shadow-lg shadow-blue-500/50'
+                    ? 'bg-red-600 text-white shadow-lg shadow-red-900/40 hover:bg-red-500' 
+                    : 'bg-gradient-to-r from-rose-600 to-red-600 text-white shadow-lg shadow-rose-900/30 hover:from-rose-500 hover:to-red-500'
                 }`}
               >
                 {isStreaming ? (
@@ -1247,34 +1245,34 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
             </div>
           </div>
 
-          <div className="bg-black/30 rounded-lg p-3">
-            <p className="text-xs text-gray-300 font-mono">
+          <div className="rounded-lg bg-black/40 p-3">
+            <p className="font-mono text-xs text-zinc-500">
               {debugInfo || 'Waiting for connection...'}
             </p>
             {isStreaming && (
-              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-gray-400">
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-zinc-500">
                 <span>📤 Frames: {framesSent}</span>
                 <span>🎯 Predictions: {predictionsReceived}</span>
                 <span>😊 Emotions: {emotionHistory.length} detected</span>
                 {lastDtwScore != null && (
-                  <span className="text-indigo-300">
+                  <span className="text-rose-300/90">
                     📊 Last match: {lastDtwScore}/100
                   </span>
                 )}
                 {sessionAvgDtwLive != null && (
-                  <span className="text-indigo-300/90">Session avg (DTW): {sessionAvgDtwLive}</span>
+                  <span className="text-rose-300/80">Session avg (DTW): {sessionAvgDtwLive}</span>
                 )}
               </div>
             )}
           </div>
         </div>
 
-        <div className="bg-white/10 backdrop-blur-md rounded-xl shadow-2xl border border-white/20 p-4 mb-6">
-          <h2 className="text-xl font-semibold mb-2 flex items-center gap-2 text-white">
+        <div className="mb-6 rounded-xl border border-white/10 bg-white/[0.06] p-4 shadow-xl backdrop-blur-md">
+          <h2 className="mb-2 flex items-center gap-2 text-xl font-semibold text-white">
             <ListChecks size={24} className="text-amber-400" />
             Template matching — calibration sentences
           </h2>
-          <p className="text-sm text-gray-400 mb-4">
+          <p className="mb-4 text-sm text-zinc-500">
             Record each sentence once (lips open, clear articulation). After you stop, Zariya checks motion quality and tells you if you should record again. Use the same flow for all six sentences before live practice.
           </p>
           {calibrationMessage && (
@@ -1324,11 +1322,11 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
           </div>
         </div>
 
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6 mb-6">
-          <div className="bg-white/10 backdrop-blur-md rounded-xl shadow-2xl border border-white/20 p-4">
-            <h2 className="text-xl font-semibold mb-4 flex items-center gap-2 text-white">
-              <Camera size={24} className="text-blue-400" />
-              Live Camera Feed
+        <div className="mb-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
+          <div className="rounded-xl border border-white/10 bg-white/[0.06] p-4 shadow-xl backdrop-blur-md">
+            <h2 className="mb-4 flex items-center gap-2 text-xl font-semibold text-white">
+              <Camera size={24} className="text-rose-400" />
+              Live camera
             </h2>
             <div className="relative bg-black rounded-lg overflow-hidden aspect-video shadow-inner">
               <video 
@@ -1357,12 +1355,12 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
                 </div>
               )}
               {isStreaming && faceDetected && isWaitingForMovement && (
-                <div className="absolute top-4 left-4 bg-blue-500/90 backdrop-blur text-white px-4 py-2 rounded-lg text-sm font-medium animate-pulse shadow-lg">
+                <div className="absolute left-4 top-4 animate-pulse rounded-lg bg-rose-600/90 px-4 py-2 text-sm font-medium text-white shadow-lg backdrop-blur">
                   👄 Speak with clear lip movements
                 </div>
               )}
               {isStreaming && faceDetected && (
-                <div className="absolute top-4 right-4 bg-gradient-to-r from-purple-500/90 to-pink-500/90 backdrop-blur text-white px-4 py-3 rounded-xl shadow-2xl border border-white/20">
+                <div className="absolute right-4 top-4 rounded-xl border border-white/15 bg-rose-950/80 px-4 py-3 text-white shadow-2xl backdrop-blur">
                   <div className="flex items-center gap-3">
                     <span className="text-5xl animate-bounce">{EMOTION_EMOTICONS[currentEmotion]}</span>
                     <div>
@@ -1378,10 +1376,10 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
             </div>
           </div>
 
-          <div className="bg-white/10 backdrop-blur-md rounded-xl shadow-2xl border border-white/20 p-4">
-            <h2 className="text-xl font-semibold mb-4 flex items-center gap-2 text-white">
-              <Mic size={24} className="text-purple-400" />
-              Mouth Region (96×96)
+          <div className="rounded-xl border border-white/10 bg-white/[0.06] p-4 shadow-xl backdrop-blur-md">
+            <h2 className="mb-4 flex items-center gap-2 text-xl font-semibold text-white">
+              <Mic size={24} className="text-rose-400" />
+              Mouth region (96×96)
             </h2>
             <div className="relative bg-black rounded-lg overflow-hidden aspect-video flex items-center justify-center shadow-inner">
               {mouthRoi ? (
@@ -1407,26 +1405,26 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
           </div>
         </div>
 
-        <div className="bg-white/10 backdrop-blur-md rounded-xl shadow-2xl border border-white/20 p-6 mb-6">
-          <h2 className="text-xl font-semibold mb-4 flex items-center gap-2 text-white">
-            <Volume2 size={24} className="text-green-400" />
-            Latest Prediction
+        <div className="mb-6 rounded-xl border border-white/10 bg-white/[0.06] p-6 shadow-xl backdrop-blur-md">
+          <h2 className="mb-4 flex items-center gap-2 text-xl font-semibold text-white">
+            <Volume2 size={24} className="text-emerald-400" />
+            Latest prediction
           </h2>
-          <div className="bg-gradient-to-r from-blue-500/20 to-purple-600/20 rounded-xl p-8 min-h-[140px] flex items-center justify-center border border-white/10">
+          <div className="flex min-h-[140px] items-center justify-center rounded-xl border border-white/10 bg-black/30 p-8">
             {prediction ? (
               <div className="text-center">
                 <p className="text-4xl font-bold text-white mb-3 animate-pulse">{prediction}</p>
                 <div className="flex flex-col items-center gap-2 text-sm text-gray-300">
                   <div className="flex items-center justify-center gap-3 flex-wrap">
                     {lastDtwScore != null && (
-                      <span className="bg-indigo-500/35 text-indigo-100 px-3 py-1 rounded-full text-xs font-medium">
+                      <span className="rounded-full bg-rose-500/25 px-3 py-1 text-xs font-medium text-rose-100">
                         DTW {lastDtwScore}/100
                       </span>
                     )}
-                    <span className="bg-green-500/30 px-3 py-1 rounded-full">
+                    <span className="rounded-full bg-emerald-500/20 px-3 py-1 text-emerald-100">
                       Prediction #{predictionsReceived}
                     </span>
-                    <span className="bg-blue-500/30 px-3 py-1 rounded-full">
+                    <span className="rounded-full bg-white/10 px-3 py-1 text-zinc-300">
                       {{
                         lip_camera_template: 'Lip template match (camera ROI)',
                         lip_camera_mock: 'Mock lip match (camera ROI)',
@@ -1435,13 +1433,13 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
                     </span>
                     <span className="text-2xl">{EMOTION_EMOTICONS[currentEmotion]}</span>
                   </div>
-                  <p className="text-xs text-gray-500 max-w-md text-center">
+                  <p className="max-w-md text-center text-xs text-zinc-600">
                     TTS off — label comes only from video frames sent to /process_frame (no microphone for text).
                   </p>
                 </div>
               </div>
             ) : (
-              <p className="text-gray-400 text-lg italic">
+              <p className="text-lg italic text-zinc-500">
                 {isStreaming ? '🎤 Listening... speak clearly' : '▶ Start session to begin'}
               </p>
             )}
@@ -1449,10 +1447,10 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
         </div>
 
         {allPredictions.length > 0 && (
-          <div className="bg-white/10 backdrop-blur-md rounded-xl shadow-2xl border border-white/20 p-6 mb-6">
-            <h3 className="text-lg font-semibold mb-4 text-white flex items-center justify-between">
-              <span>📜 Recent Predictions with Emotions</span>
-              <span className="text-sm text-gray-400">{allPredictions.length} total</span>
+          <div className="mb-6 rounded-xl border border-white/10 bg-white/[0.06] p-6 shadow-xl backdrop-blur-md">
+            <h3 className="mb-4 flex items-center justify-between text-lg font-semibold text-white">
+              <span>📜 Recent predictions</span>
+              <span className="text-sm text-zinc-500">{allPredictions.length} total</span>
             </h3>
             <div className="space-y-2 max-h-64 overflow-y-auto">
               {allPredictions.slice(0, 10).map((pred) => (
@@ -1467,7 +1465,7 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
                       <p className="text-xs text-gray-500">
                         {new Date(pred.timestamp).toLocaleTimeString()} • {pred.emotion} ({pred.emotionConfidence}%)
                         {typeof pred.dtwScore === 'number' && (
-                          <span className="text-indigo-400 ml-1">· DTW {pred.dtwScore}</span>
+                          <span className="ml-1 text-rose-400/90">· DTW {pred.dtwScore}</span>
                         )}
                       </p>
                     </div>
@@ -1479,24 +1477,24 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
           </div>
         )}
 
-        <div className="bg-gradient-to-r from-blue-500/20 to-green-500/20 backdrop-blur border border-blue-400/30 rounded-xl p-6">
-          <h3 className="font-semibold text-blue-200 mb-3 text-lg flex items-center gap-2">
-            <Stethoscope size={20} />
-            Medical Usage Instructions
+        <div className="rounded-xl border border-white/10 bg-black/25 p-6 backdrop-blur-sm">
+          <h3 className="mb-3 flex items-center gap-2 text-lg font-semibold text-zinc-200">
+            <Stethoscope size={20} className="text-rose-400" />
+            Medical usage
           </h3>
-          <div className="grid sm:grid-cols-2 gap-4 text-sm text-blue-100">
+          <div className="grid gap-4 text-sm text-zinc-400 sm:grid-cols-2">
             <div>
-              <p className="font-semibold mb-2">✓ For Healthcare Providers:</p>
-              <ul className="space-y-1 text-blue-200">
+              <p className="mb-2 font-semibold text-zinc-300">For healthcare providers</p>
+              <ul className="space-y-1">
                 <li>• Monitor patient speech rehabilitation progress</li>
-                <li>• Track emotional states with ML detection (DeepFace Model)</li>
-                <li>• Generate detailed practice reports with emotion data</li>
+                <li>• Track emotional states with ML detection (DeepFace)</li>
+                <li>• Generate practice reports with emotion data</li>
                 <li>• Document clinical observations</li>
               </ul>
             </div>
             <div>
-              <p className="font-semibold mb-2">✓ For Patients:</p>
-              <ul className="space-y-1 text-blue-200">
+              <p className="mb-2 font-semibold text-zinc-300">For patients</p>
+              <ul className="space-y-1">
                 <li>• Practice speech with visual feedback</li>
                 <li>• Exaggerate lip movements clearly</li>
                 <li>• Speak slowly and pause between phrases</li>
@@ -1504,13 +1502,11 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
               </ul>
             </div>
           </div>
-          <div className="mt-4 pt-4 border-t border-blue-400/20">
-            <p className="text-xs text-blue-300">
-              <strong>ML-Based Emotion Detection:</strong> This system uses Deepface, a tensorflow model
-              running on the Python backend server. Your emotions are analyzed every 5 seconds during the session 
-              to track engagement, comfort, and emotional state. The ML model processes facial expressions 
-              server-side and sends results to your browser.
-              {emotionDetectionStatus !== 'ready' && ' (Currently unavailable - check server console)'}
+          <div className="mt-4 border-t border-white/10 pt-4">
+            <p className="text-xs text-zinc-500">
+              <strong className="text-zinc-400">Emotion detection:</strong> DeepFace on the Python backend analyzes
+              expressions about every five seconds during the session. Processing is server-side.
+              {emotionDetectionStatus !== 'ready' && ' (Unavailable — check server console.)'}
             </p>
           </div>
         </div>
@@ -1518,6 +1514,7 @@ Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' :
 
       <canvas ref={canvasRef} style={{ display: 'none' }} />
     </div>
+    </RippleBackground>
     </>
   );
 }
