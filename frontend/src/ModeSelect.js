@@ -1,19 +1,22 @@
-import React from 'react';
+import React, { useEffect, useRef } from 'react';
 import { BookOpen, Sparkles, ClipboardCheck, TrendingUp, ArrowRight } from 'lucide-react';
 
+/** Wake phrase → open Mode 2 (Unpanic me). Accepts Zariya / Zayira spelling. */
+//const UNPANIC_WAKE_REGEX = /hey\s+(zayira|zariya)[,\s!]*\s*unpanic\s+me/i;
+const UNPANIC_WAKE_REGEX = /unpanic\s+me/i;
 const MODES = [
   {
     id: 1,
-    title: 'Introduction',
-    subtitle: 'Get oriented with Zariya and how lip reading practice works.',
+    title: 'Interview mode',
+    subtitle: 'Voice AI interviewer: speak, get follow-ups, report & replay feedback.',
     icon: BookOpen,
     color: 'from-sky-500 to-blue-600',
     border: 'border-sky-500/40',
   },
   {
     id: 2,
-    title: 'Guided training',
-    subtitle: 'Step-by-step prompts and pacing (coming soon).',
+    title: 'Unpanic me',
+    subtitle: 'Voice agent: calm down with your ElevenLabs Zariya agent.',
     icon: Sparkles,
     color: 'from-violet-500 to-purple-600',
     border: 'border-violet-500/40',
@@ -38,12 +41,68 @@ const MODES = [
 ];
 
 export default function ModeSelect({ onSelectMode }) {
+  const wakeRef = useRef(null);
+  const wakeMatchedRef = useRef(false);
+
+  useEffect(() => {
+    const Rec = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
+    if (!Rec) return undefined;
+
+    wakeMatchedRef.current = false;
+    const r = new Rec();
+    wakeRef.current = r;
+    r.continuous = true;
+    r.interimResults = true;
+    r.lang = 'en-US';
+    r.onresult = (ev) => {
+      let text = '';
+      for (let i = ev.resultIndex; i < ev.results.length; i++) {
+        text += ev.results[i][0].transcript;
+      }
+      if (UNPANIC_WAKE_REGEX.test(text.trim())) {
+        wakeMatchedRef.current = true;
+        try {
+          r.stop();
+        } catch {
+          /* ignore */
+        }
+        onSelectMode(2);
+      }
+    };
+    r.onerror = () => {};
+    r.onend = () => {
+      if (wakeMatchedRef.current || wakeRef.current !== r) return;
+      try {
+        r.start();
+      } catch {
+        /* ignore */
+      }
+    };
+    try {
+      r.start();
+    } catch {
+      return undefined;
+    }
+    return () => {
+      wakeRef.current = null;
+      try {
+        r.stop();
+      } catch {
+        /* ignore */
+      }
+    };
+  }, [onSelectMode]);
+
   return (
     <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-950 to-slate-900 p-4 sm:p-8 flex flex-col">
       <div className="max-w-5xl mx-auto w-full flex-1 flex flex-col justify-center">
         <div className="text-center mb-10">
           <h1 className="text-3xl sm:text-4xl font-bold text-white mb-2">Choose a mode</h1>
           <p className="text-gray-400 text-lg">Select how you want to use Zariya today.</p>
+          <p className="text-violet-300/80 text-sm mt-3 max-w-md mx-auto">
+            Tip: say <span className="text-violet-200 font-medium">“Unpanic me”</span> to open Unpanic
+            me hands-free (Chrome / Edge).
+          </p>
         </div>
 
         <div className="grid sm:grid-cols-2 gap-4 sm:gap-6">

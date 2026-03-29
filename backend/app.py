@@ -3,6 +3,14 @@ import sys
 import traceback
 import importlib.util
 
+_backend_dir_for_env = os.path.dirname(os.path.abspath(__file__))
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(os.path.join(_backend_dir_for_env, ".env"))
+except ImportError:
+    pass
+
 # Disable TensorFlow Metal/MPS before imports
 os.environ['CUDA_VISIBLE_DEVICES'] = '-1'  # Force CPU for TensorFlow
 os.environ['TF_ENABLE_ONEDNN_OPTS'] = '0'  # Disable oneDNN
@@ -24,7 +32,10 @@ import random
 from pathlib import Path
 from collections import deque
 from datetime import datetime
-from flask import Flask, request, jsonify
+import urllib.error
+import urllib.request
+
+from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 from werkzeug.security import generate_password_hash, check_password_hash
 from itsdangerous import URLSafeTimedSerializer, BadSignature, SignatureExpired
@@ -84,6 +95,7 @@ except Exception as e:
     )
 
 import smtplib
+import ssl
 from email.mime.text import MIMEText
 from email.mime.multipart import MIMEMultipart
 from email.mime.base import MIMEBase
@@ -207,11 +219,14 @@ TEMPLATE_DIR = os.environ.get(
 )
 
 EMAIL_CONFIG = {
-    'smtp_server': 'smtp.gmail.com',
-    'smtp_port': 587,
+    # Gmail: use an App Password (Google Account → Security → 2-Step Verification → App passwords).
+    'smtp_server': os.environ.get('SMTP_SERVER', 'smtp.gmail.com'),
+    'smtp_port': int(os.environ.get('SMTP_PORT', '587')),
+    # 587 + STARTTLS (default) or 465 + SMTP_SSL (set SMTP_USE_SSL=1)
+    'use_ssl': os.environ.get('SMTP_USE_SSL', '').lower() in ('1', 'true', 'yes'),
     'sender_email': os.environ.get('SENDER_EMAIL', 'your-email@gmail.com'),
     'sender_password': os.environ.get('EMAIL_PASSWORD', 'your-app-password'),
-    'sender_name': 'Zariya Report'
+    'sender_name': 'Zariya Report',
 }
 
 RECORDING_MODE = False
@@ -420,54 +435,54 @@ def template_pair_similarity(seq1, seq2):
 
 def predict_using_templates(frame_buffer_deque):
     """
-    Predict word by matching against templates using cosine similarity
-    ✅ ENHANCED: Checks for startup grace period
-    
-    Args:
-        frame_buffer_deque: deque of mouth ROI frames
-    
+    Predict sentence id by template matching (DTW / cosine). Returns a dict with metrics for reports.
+
     Returns:
-        predicted word or None
+        dict with word, dtw_similarity (0–1), linear_similarity (0–1), margin — or None
     """
-    # ✅ CHECK: Don't run during startup grace period
     time_since_startup = time.time() - SESSION_START_TIME
     if time_since_startup < STARTUP_GRACE_PERIOD:
         remaining = STARTUP_GRACE_PERIOD - time_since_startup
         print(f"[TEMPLATE MATCHING] ⏳ Waiting for startup grace period ({remaining:.1f}s remaining)")
         return None
-    
+
     if len(frame_buffer_deque) < FRAME_BUFFER_SIZE:
         return None
-    
+
     if len(template_library) == 0:
         print("[TEMPLATE MATCHING] No templates loaded. Record some first!")
         return None
-    
+
     try:
-        # Convert buffer to numpy array
         input_frames = np.array(list(frame_buffer_deque))
-        
+
         print(f"[TEMPLATE MATCHING] Comparing against {len(template_library)} words...")
-        
+
         all_scores = {}
+        best_frames_for_word = {}
 
         for word, templates in template_library.items():
-            word_scores = []
+            best_s = -1.0
+            best_tf = None
             for template in templates:
                 template_frames = template["frames"]
                 score = template_pair_similarity(input_frames, template_frames)
-                word_scores.append(score)
-            all_scores[word] = float(np.max(word_scores))
+                if score > best_s:
+                    best_s = float(score)
+                    best_tf = template_frames
+            all_scores[word] = best_s
+            best_frames_for_word[word] = best_tf
 
-        # Print all scores
-        print(f"[TEMPLATE MATCHING] Scores (max per class, DTW={TEMPLATE_MATCH_USE_DTW}, motion={TEMPLATE_MATCH_USE_MOTION}):")
+        print(
+            f"[TEMPLATE MATCHING] Scores (max per class, DTW={TEMPLATE_MATCH_USE_DTW}, motion={TEMPLATE_MATCH_USE_MOTION}):"
+        )
         for word, score in sorted(all_scores.items(), key=lambda x: x[1], reverse=True):
             print(f"  - {word}: {score:.3f}")
 
         ranked = sorted(all_scores.items(), key=lambda x: x[1], reverse=True)
         best_word = ranked[0][0]
-        best_score = ranked[0][1]
-        second_best = ranked[1][1] if len(ranked) > 1 else 0.0
+        best_score = float(ranked[0][1])
+        second_best = float(ranked[1][1]) if len(ranked) > 1 else 0.0
         margin = best_score - second_best
 
         if best_score < TEMPLATE_MATCH_MIN_CONFIDENCE:
@@ -483,17 +498,48 @@ def predict_using_templates(frame_buffer_deque):
             )
             return None
 
+        tmpl = best_frames_for_word.get(best_word)
+        linear_sim = (
+            float(linear_aligned_cosine_similarity(input_frames, tmpl))
+            if tmpl is not None
+            else best_score
+        )
+
         print(
             f"[TEMPLATE MATCHING] ✓ Matched: '{best_word}' "
-            f"(score: {best_score:.3f}, margin: {margin:.3f})"
+            f"(DTW-like: {best_score:.3f}, linear: {linear_sim:.3f}, margin: {margin:.3f})"
         )
-        return best_word
-            
+        return {
+            "word": best_word,
+            "dtw_similarity": best_score,
+            "linear_similarity": linear_sim,
+            "margin": margin,
+        }
+
     except Exception as e:
         print(f"[ERROR] Template matching: {e}")
         import traceback
         traceback.print_exc()
         return None
+
+
+def _coerce_prediction_result(raw):
+    """Normalize predict_speech_* return value to (word_or_none, metrics_dict)."""
+    if raw is None:
+        return None, {}
+    if isinstance(raw, dict):
+        w = raw.get("word")
+        if w is None or (isinstance(w, str) and not w.strip()):
+            return None, {}
+        return str(w).strip(), {
+            "dtw_similarity": raw.get("dtw_similarity"),
+            "linear_similarity": raw.get("linear_similarity"),
+            "margin": raw.get("margin"),
+        }
+    if isinstance(raw, str):
+        s = raw.strip()
+        return (s if s else None), {}
+    return None, {}
 
 
 # ============================================================
@@ -563,81 +609,83 @@ def stop_recording():
     msg = quality["detail"] if quality["need_rerecord"] else f"Saved template for '{word}'"
     return True, msg, meta
 
+def _html_escape(s):
+    if s is None:
+        return ""
+    t = str(s)
+    return (
+        t.replace("&", "&amp;")
+        .replace("<", "&lt;")
+        .replace(">", "&gt;")
+        .replace('"', "&quot;")
+    )
+
+
 def generate_html_report(report_data, session_id=None):
-    """
-    Generate HTML email content for the session report
-    
-    Args:
-        report_data: Dictionary with session information
-        session_id: Optional session ID
-    
-    Returns:
-        str: HTML content
-    """
-    predictions = report_data.get('predictions', [])
-    emotions = report_data.get('emotions', [])
-    #session_duration = report_data.get('duration', 'N/A')
-    
-    
+    """HTML email for Mode 4 session report (DTW-focused sections + optional emotions)."""
+    patient_name = _html_escape(report_data.get("patient_name") or "—")
+    patient_id = _html_escape(report_data.get("patient_id") or "—")
+    duration = _html_escape(report_data.get("duration") or "—")
+    session_notes = _html_escape(report_data.get("session_notes") or "")
+
+    overall = report_data.get("overall_score")
+    overall_str = f"{int(overall)}" if overall is not None else "—"
+
+    sentence_results = report_data.get("sentence_results") or []
+    rows_html = ""
+    for row in sentence_results:
+        txt = _html_escape(row.get("text", ""))
+        cnt = int(row.get("count") or 0)
+        sc = row.get("score")
+        sc_str = f"{int(sc)}" if sc is not None else "—"
+        lbl = _html_escape(row.get("label") or "—")
+        rows_html += f"""
+        <tr>
+            <td style="padding: 10px; border-bottom: 1px solid #e8e8e8;">{txt}</td>
+            <td style="padding: 10px; border-bottom: 1px solid #e8e8e8; text-align: center;">{cnt}</td>
+            <td style="padding: 10px; border-bottom: 1px solid #e8e8e8; text-align: center;">{sc_str}</td>
+            <td style="padding: 10px; border-bottom: 1px solid #e8e8e8; text-align: center;">{lbl}</td>
+        </tr>
+        """
+    if not rows_html:
+        rows_html = """
+        <tr><td colspan="4" style="padding: 16px; color: #888; text-align: center;">No sentence matches this session</td></tr>
+        """
+
+    feedback = report_data.get("key_feedback") or []
+    fb_html = ""
+    for line in feedback[:5]:
+        fb_html += f'<li style="margin: 6px 0;">{_html_escape(line)}</li>'
+    if not fb_html:
+        fb_html = "<li style='color:#888;'>No feedback available yet.</li>"
+
+    best = report_data.get("best_attempt") or {}
+    best_text = _html_escape(best.get("text") or "—")
+    best_sc = best.get("score")
+    best_sc_str = f"{int(best_sc)}" if best_sc is not None else "—"
+
+    emotions = report_data.get("emotions") or []
     emotion_counts = {}
     for emotion in emotions:
-        # Handle both dict and string formats
         if isinstance(emotion, dict):
-            emotion_name = emotion.get('emotion', 'neutral')
+            emotion_name = emotion.get("emotion", "neutral")
         else:
             emotion_name = emotion
-        
         emotion_counts[emotion_name] = emotion_counts.get(emotion_name, 0) + 1
-        dominant_emotion = max(emotion_counts, key=emotion_counts.get) if emotion_counts else "neutral"
-        
-    # Build predictions list
-    predictions_html = ""
-    for i, pred in enumerate(predictions, 1):
-        word = pred.get('word', 'N/A')
-        timestamp = pred.get('timestamp', 'N/A')
-        confidence = pred.get('confidence', 0)
-        
-        predictions_html += f"""
-        <tr>
-            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0;">{i}</td>
-            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0; font-weight: 600;">{word}</td>
-            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0;">{timestamp}</td>
-            <td style="padding: 12px; border-bottom: 1px solid #e0e0e0;">{confidence}%</td>
-        </tr>
-        """
-    
-    if not predictions_html:
-        predictions_html = """
-        <tr>
-            <td colspan="4" style="padding: 20px; text-align: center; color: #999;">
-                No predictions recorded in this session
-            </td>
-        </tr>
-        """
-    
-    # Build emotion summary
+    dominant_emotion = max(emotion_counts, key=emotion_counts.get) if emotion_counts else "neutral"
+
     emotion_summary_html = ""
-    for emotion, count in sorted(emotion_counts.items(), key=lambda x: x[1], reverse=True):
-        percentage = (count / len(emotions) * 100) if emotions else 0
+    for emo, count in sorted(emotion_counts.items(), key=lambda x: x[1], reverse=True):
+        pct = (count / len(emotions) * 100) if emotions else 0
         emotion_summary_html += f"""
-        <div style="margin-bottom: 10px;">
-            <div style="display: flex; justify-content: space-between; margin-bottom: 5px;">
-                <span style="font-weight: 500; text-transform: capitalize;">{emotion}</span>
-                <span>{count} times ({percentage:.1f}%)</span>
-            </div>
-            <div style="background: #f0f0f0; height: 8px; border-radius: 4px; overflow: hidden;">
-                <div style="background: #4CAF50; height: 100%; width: {percentage}%;"></div>
-            </div>
+        <div style="margin-bottom: 8px;">
+            <span style="font-weight: 500; text-transform: capitalize;">{_html_escape(emo)}</span>
+            <span style="color:#666;"> — {count} ({pct:.0f}%)</span>
         </div>
         """
-    
     if not emotion_summary_html:
-        emotion_summary_html = """
-        <p style="color: #999; text-align: center; padding: 20px;">
-            No emotion data recorded
-        </p>
-        """
-    
+        emotion_summary_html = '<p style="color:#999;margin:0;">No emotion samples this session.</p>'
+
     html = f"""
     <!DOCTYPE html>
     <html>
@@ -645,135 +693,135 @@ def generate_html_report(report_data, session_id=None):
         <meta charset="UTF-8">
         <meta name="viewport" content="width=device-width, initial-scale=1.0">
     </head>
-    <body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif; background-color: #f5f5f5;">
-        <div style="max-width: 600px; margin: 0 auto; background: white; padding: 0;">
-            <!-- Header -->
-            <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); padding: 40px 30px; text-align: center;">
-                <h1 style="margin: 0; color: white; font-size: 28px; font-weight: 600;">
-                    Zariya: Digital Report for Yashvi
-                </h1>
-                <p style="margin: 10px 0 0 0; color: rgba(255,255,255,0.9); font-size: 14px;">
-                    Generated on {datetime.now().strftime('%B %d, %Y at %I:%M %p')}
+    <body style="margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#f0f4f8;">
+        <div style="max-width:600px;margin:0 auto;background:#fff;">
+            <div style="background:linear-gradient(135deg,#4f46e5 0%,#7c3aed 100%);padding:32px 24px;text-align:center;">
+                <h1 style="margin:0;color:#fff;font-size:24px;font-weight:600;">Zariya — Practice session report</h1>
+                <p style="margin:10px 0 0;color:rgba(255,255,255,0.9);font-size:13px;">
+                    {datetime.now().strftime('%B %d, %Y · %I:%M %p')}
                 </p>
-                {f'<p style="margin: 5px 0 0 0; color: rgba(255,255,255,0.8); font-size: 12px;">Session ID: {session_id}</p>' if session_id else ''}
+                {f'<p style="margin:6px 0 0;color:rgba(255,255,255,0.75);font-size:12px;">Session: {_html_escape(session_id)}</p>' if session_id else ''}
             </div>
-            
-            <!-- Session Summary -->
-            <div style="padding: 30px;">
-                <h2 style="margin: 0 0 20px 0; color: #333; font-size: 20px;">
-                    📊 Session Summary
-                </h2>
-                
-                <div style="background: #f8f9fa; padding: 20px; border-radius: 8px; margin-bottom: 30px;">
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 20px;">
-                        
-                        <div>
-                            <div style="color: #666; font-size: 12px; margin-bottom: 5px;">PREDICTIONS</div>
-                            <div style="color: #333; font-size: 18px; font-weight: 600;">{len(predictions)}</div>
-                        </div>
-                        <div>
-                            <div style="color: #666; font-size: 12px; margin-bottom: 5px;">DOMINANT EMOTION</div>
-                            <div style="color: #333; font-size: 18px; font-weight: 600; text-transform: capitalize;">{dominant_emotion}</div>
-                        </div>
-                    </div>
+            <div style="padding:24px;">
+                <p style="margin:0 0 16px;color:#444;font-size:14px;">
+                    <strong>Patient:</strong> {patient_name} &nbsp;·&nbsp; <strong>ID:</strong> {patient_id}<br/>
+                    <strong>Duration:</strong> {duration}
+                </p>
+
+                <h2 style="color:#1e293b;font-size:17px;margin:20px 0 10px;">1) Overall score</h2>
+                <div style="background:#f1f5f9;border-radius:10px;padding:20px;text-align:center;">
+                    <div style="font-size:42px;font-weight:700;color:#4f46e5;">{overall_str}</div>
+                    <div style="font-size:12px;color:#64748b;margin-top:6px;">Based on DTW lip-template similarity (0–100)</div>
                 </div>
-                
-                <!-- Predictions Table -->
-                <h2 style="margin: 0 0 15px 0; color: #333; font-size: 20px;">
-                    💬 Detected Words
-                </h2>
-                
-                <table style="width: 100%; border-collapse: collapse; margin-bottom: 30px;">
+
+                <h2 style="color:#1e293b;font-size:17px;margin:24px 0 10px;">2) Sentence results</h2>
+                <table style="width:100%;border-collapse:collapse;font-size:14px;">
                     <thead>
-                        <tr style="background: #f8f9fa;">
-                            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #e0e0e0; color: #666; font-size: 12px; font-weight: 600;">#</th>
-                            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #e0e0e0; color: #666; font-size: 12px; font-weight: 600;">WORD</th>
-                            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #e0e0e0; color: #666; font-size: 12px; font-weight: 600;">TIME</th>
-                            <th style="padding: 12px; text-align: left; border-bottom: 2px solid #e0e0e0; color: #666; font-size: 12px; font-weight: 600;">CONFIDENCE</th>
+                        <tr style="background:#f8fafc;">
+                            <th style="padding:10px;text-align:left;border-bottom:2px solid #e2e8f0;">Sentence</th>
+                            <th style="padding:10px;text-align:center;border-bottom:2px solid #e2e8f0;">Times</th>
+                            <th style="padding:10px;text-align:center;border-bottom:2px solid #e2e8f0;">Score</th>
+                            <th style="padding:10px;text-align:center;border-bottom:2px solid #e2e8f0;">Label</th>
                         </tr>
                     </thead>
-                    <tbody>
-                        {predictions_html}
-                    </tbody>
+                    <tbody>{rows_html}</tbody>
                 </table>
-                
-                <!-- Emotion Analysis -->
-                <h2 style="margin: 0 0 15px 0; color: #333; font-size: 20px;">
-                    😊 Emotion Analysis
-                </h2>
-                
-                <div style="background: #f8f9fa; padding: 20px; border-radius: 8px;">
+
+                <h2 style="color:#1e293b;font-size:17px;margin:24px 0 10px;">3) Key feedback</h2>
+                <ul style="margin:0;padding-left:20px;color:#334155;">{fb_html}</ul>
+
+                <h2 style="color:#1e293b;font-size:17px;margin:24px 0 10px;">4) Best attempt</h2>
+                <div style="background:#ecfdf5;border:1px solid #a7f3d0;border-radius:10px;padding:16px;">
+                    <p style="margin:0;font-size:15px;color:#065f46;"><strong>{best_text}</strong></p>
+                    <p style="margin:8px 0 0;font-size:13px;color:#047857;">Score: {best_sc_str}</p>
+                </div>
+
+                <h2 style="color:#1e293b;font-size:17px;margin:24px 0 10px;">Emotion overview</h2>
+                <div style="background:#fafafa;border-radius:8px;padding:14px;font-size:14px;">
+                    <p style="margin:0 0 8px;"><strong>Dominant:</strong> {_html_escape(dominant_emotion)}</p>
                     {emotion_summary_html}
                 </div>
+
+                <h2 style="color:#1e293b;font-size:17px;margin:24px 0 10px;">Clinical notes</h2>
+                <p style="white-space:pre-wrap;color:#475569;font-size:14px;margin:0;padding:12px;background:#f8fafc;border-radius:8px;border:1px solid #e2e8f0;">
+                    {session_notes or "—"}
+                </p>
             </div>
-            
-            <!-- Footer -->
-            <div style="background: #f8f9fa; padding: 20px 30px; text-align: center; border-top: 1px solid #e0e0e0;">
-                <p style="margin: 0; color: #999; font-size: 12px;">
-                    This report was automatically generated by Zariya
-                </p>
-                <p style="margin: 10px 0 0 0; color: #999; font-size: 12px;">
-                    For questions or support, please contact your administrator
-                </p>
+            <div style="background:#f1f5f9;padding:16px;text-align:center;font-size:12px;color:#94a3b8;">
+                Generated by Zariya · Lip-reading practice assistant
             </div>
         </div>
     </body>
     </html>
     """
-    
     return html
 
 def send_report_email(recipient_email, report_data, session_id=None):
     """
-    Send the Zariya report via email
-    
-    Args:
-        recipient_email: Email address to send report to
-        report_data: Dictionary containing session data (predictions, emotions, etc.)
-        session_id: Optional session identifier
-    
-    Returns:
-        tuple: (success: bool, message: str)
+    Send the Zariya report via email.
+    Set SENDER_EMAIL and EMAIL_PASSWORD (Gmail: 16-char App Password, not your normal password).
+    Optional: SMTP_SERVER, SMTP_PORT, SMTP_USE_SSL=1 for port 465.
     """
     try:
-        # Create message
-        msg = MIMEMultipart('alternative')
-        msg['Subject'] = f"Zariya Report for Patient 1012 - {datetime.now().strftime('%Y-%m-%d %H:%M')}"
-        msg['From'] = f"{EMAIL_CONFIG['sender_name']} <{EMAIL_CONFIG['sender_email']}>"
-        msg['To'] = recipient_email
-        
-        # Generate HTML report
+        sender = (EMAIL_CONFIG.get("sender_email") or "").strip()
+        password = EMAIL_CONFIG.get("sender_password") or ""
+        smtp_server = EMAIL_CONFIG.get("smtp_server") or "smtp.gmail.com"
+        smtp_port = int(EMAIL_CONFIG.get("smtp_port") or 587)
+        use_ssl = bool(EMAIL_CONFIG.get("use_ssl"))
+
+        placeholder_pw = password.strip() in ("", "your-app-password")
+        placeholder_sender = sender in ("", "your-email@gmail.com")
+        if placeholder_pw or placeholder_sender:
+            hint = (
+                "Email not configured. Set environment variables SENDER_EMAIL and EMAIL_PASSWORD. "
+                "For Gmail: Google Account → Security → 2-Step Verification → App passwords, "
+                "then use that 16-character password (not your login password)."
+            )
+            print(f"[EMAIL ERROR] {hint}")
+            return False, hint
+
+        msg = MIMEMultipart("alternative")
+        msg["Subject"] = f"Zariya session report — {datetime.now().strftime('%Y-%m-%d %H:%M')}"
+        msg["From"] = f"{EMAIL_CONFIG['sender_name']} <{sender}>"
+        msg["To"] = recipient_email
+
         html_content = generate_html_report(report_data, session_id)
-        
-        # Attach HTML content
-        html_part = MIMEText(html_content, 'html')
-        msg.attach(html_part)
-        
-        # Connect to SMTP server and send
-        print(f"[EMAIL] Connecting to {EMAIL_CONFIG['smtp_server']}...")
-        server = smtplib.SMTP(EMAIL_CONFIG['smtp_server'], EMAIL_CONFIG['smtp_port'])
-        server.starttls()
-        
-        print(f"[EMAIL] Logging in...")
-        server.login(EMAIL_CONFIG['sender_email'], EMAIL_CONFIG['sender_password'])
-        
+        msg.attach(MIMEText(html_content, "html"))
+
+        ctx = ssl.create_default_context()
+        print(f"[EMAIL] Connecting to {smtp_server}:{smtp_port} (SSL={use_ssl})...")
+
+        if use_ssl:
+            server = smtplib.SMTP_SSL(smtp_server, smtp_port, context=ctx, timeout=30)
+        else:
+            server = smtplib.SMTP(smtp_server, smtp_port, timeout=30)
+            server.ehlo()
+            server.starttls(context=ctx)
+            server.ehlo()
+
+        print("[EMAIL] Logging in...")
+        server.login(sender, password)
+
         print(f"[EMAIL] Sending to {recipient_email}...")
         server.send_message(msg)
         server.quit()
-        
+
         print(f"[EMAIL] ✓ Successfully sent report to {recipient_email}")
         return True, f"Report sent successfully to {recipient_email}"
-        
-    except smtplib.SMTPAuthenticationError:
-        error_msg = "Email authentication failed. Please check credentials."
-        print(f"[EMAIL ERROR] {error_msg}")
+
+    except smtplib.SMTPAuthenticationError as e:
+        error_msg = (
+            "Email authentication failed. For Gmail use an App Password with SENDER_EMAIL; "
+            "check SMTP_SERVER/SMTP_PORT; try SMTP_USE_SSL=1 with port 465 if STARTTLS fails."
+        )
+        print(f"[EMAIL ERROR] SMTPAuthenticationError: {e}")
         return False, error_msg
-        
+
     except smtplib.SMTPException as e:
         error_msg = f"SMTP error: {str(e)}"
         print(f"[EMAIL ERROR] {error_msg}")
         return False, error_msg
-        
+
     except Exception as e:
         error_msg = f"Failed to send email: {str(e)}"
         print(f"[EMAIL ERROR] {error_msg}")
@@ -1333,18 +1381,35 @@ def process_frame(frame_data):
                                     print(f"[🎬 RUNNING PREDICTION #{prediction_count + 1}]")
                                     print(f"{'='*60}")
                                     
-                                    # This will now respect the startup grace period
-                                    pred = predict_speech_avhubert(frame_buffer)
-                                    
+                                    raw_pred = predict_speech_avhubert(frame_buffer)
+                                    pred, lip_metrics = _coerce_prediction_result(raw_pred)
+
                                     if pred and len(pred.strip()) > 0:
                                         if pred != last_prediction_text or time_since_last > PREDICTION_COOLDOWN:
                                             prediction_count += 1
                                             last_prediction_time = current_time
                                             last_prediction_text = pred
-                                            
+
                                             print(f"\n✓✓✓ PREDICTION #{prediction_count}: '{pred}' ✓✓✓\n")
                                             payload["prediction"] = pred
                                             payload["prediction_display"] = sentence_id_to_display(pred.strip())
+                                            payload["prediction_number"] = prediction_count
+                                            ds = lip_metrics.get("dtw_similarity")
+                                            if ds is not None:
+                                                try:
+                                                    sf = float(ds)
+                                                    sf = max(0.0, min(1.0, sf))
+                                                    lm = {
+                                                        "score_100": int(round(sf * 100)),
+                                                        "dtw_similarity": sf,
+                                                    }
+                                                    if lip_metrics.get("linear_similarity") is not None:
+                                                        lm["linear_similarity"] = float(lip_metrics["linear_similarity"])
+                                                    if lip_metrics.get("margin") is not None:
+                                                        lm["margin"] = float(lip_metrics["margin"])
+                                                    payload["lip_match"] = lm
+                                                except (TypeError, ValueError):
+                                                    pass
                                             # Provenance for UI: all paths use mouth ROI frames from the camera (no mic)
                                             if USE_TEMPLATE_MATCHING:
                                                 payload["prediction_source"] = "lip_camera_template"
@@ -1423,12 +1488,22 @@ def predict_speech_mock(frame_buffer_deque):
         num_words = random.choices([1, 2, 3], weights=[0.6, 0.3, 0.1])[0]
         selected_words = random.sample(MOCK_VOCABULARY, num_words)
         prediction = " ".join(selected_words)
-        
+
+        random.seed(seed_value + 7)
+        dtw_sim = float(min(0.98, max(0.35, 0.55 + random.random() * 0.4)))
+        lin_sim = float(max(0.2, dtw_sim - random.random() * 0.12))
+        margin = float(max(0.04, random.random() * 0.2))
+
         print(f"[MOCK PREDICTION] Metrics - Mean: {mean_intensity:.2f}, Var: {variance:.2f}, Edge: {edge_density:.2f}")
         print(f"[MOCK PREDICTION] Seed: {seed_value}, Words: {num_words}")
         print(f"[MOCK PREDICTION] Text: '{prediction}'")
-        
-        return prediction
+
+        return {
+            "word": prediction,
+            "dtw_similarity": dtw_sim,
+            "linear_similarity": lin_sim,
+            "margin": margin,
+        }
         
     except Exception as e:
         print(f"[ERROR] Mock prediction: {e}")
@@ -1452,11 +1527,20 @@ def predict_speech_avhubert(frame_buffer_deque):
         from avhubert_inference import predict_lip_reading_text
 
         frames = list(frame_buffer_deque)
-        return predict_lip_reading_text(
+        text = predict_lip_reading_text(
             frames,
             model_path=Path(MODEL_PATH),
             avhubert_root=Path(AVHUBERT_ROOT),
         )
+        if not text or not str(text).strip():
+            return None
+        # No DTW in pure AV-HuBERT path — frontend report uses placeholder / omits lip scores
+        return {
+            "word": str(text).strip(),
+            "dtw_similarity": None,
+            "linear_similarity": None,
+            "margin": None,
+        }
     except ImportError as e:
         print(f"[AVHUBERT] Import failed: {e}")
         return None
@@ -1465,6 +1549,214 @@ def predict_speech_avhubert(frame_buffer_deque):
         import traceback
         traceback.print_exc()
         return None
+
+
+def _elevenlabs_synthesize(
+    text,
+    *,
+    voice_id=None,
+    stability=None,
+    similarity=None,
+):
+    """Call ElevenLabs text-to-speech; returns MP3 bytes. Requires ELEVENLABS_API_KEY."""
+    api_key = "sk_08f989a11395ffb3061d036f29fd6fe6fdc3355385f525e1"
+    if not api_key:
+        raise ValueError("ELEVENLABS_API_KEY is not set (add it to your .env or environment).")
+    vid = voice_id or os.environ.get("ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM")
+    model_id = os.environ.get("ELEVENLABS_MODEL_ID", "eleven_multilingual_v2")
+    stab = float(stability if stability is not None else os.environ.get("ELEVENLABS_STABILITY", "0.5"))
+    sim = float(similarity if similarity is not None else os.environ.get("ELEVENLABS_SIMILARITY", "0.75"))
+    url = f"https://api.elevenlabs.io/v1/text-to-speech/{vid}"
+    payload = json.dumps(
+        {
+            "text": text,
+            "model_id": model_id,
+            "voice_settings": {
+                "stability": stab,
+                "similarity_boost": sim,
+            },
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=payload,
+        method="POST",
+        headers={
+            "xi-api-key": api_key,
+            "Content-Type": "application/json",
+            "Accept": "audio/mpeg",
+        },
+    )
+    with urllib.request.urlopen(req, timeout=120) as resp:
+        return resp.read()
+
+
+# --- Interview mode (Gemini + ElevenLabs tone profiles) --------------------
+
+INTERVIEW_FILLER_RE = re.compile(
+    r"\b(um|uh|uhm|erm|like|you know|basically|actually|sort of|kind of|i mean|well)\b",
+    re.I,
+)
+
+
+def _interview_gemini_api_key():
+    return (os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY") or "").strip()
+
+
+def _gemini_generate_text(prompt, max_tokens=1024):
+    key = _interview_gemini_api_key()
+    if not key:
+        raise ValueError("Set GEMINI_API_KEY or GOOGLE_API_KEY for interview mode.")
+    # Default to current stable Flash (1.5 unpinned names are often 404 on v1beta now).
+    model = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+    url = (
+        f"https://generativelanguage.googleapis.com/v1beta/models/"
+        f"{model}:generateContent?key={key}"
+    )
+    body = json.dumps(
+        {
+            "contents": [{"parts": [{"text": prompt}]}],
+            "generationConfig": {
+                "temperature": 0.72,
+                "maxOutputTokens": max_tokens,
+            },
+        }
+    ).encode("utf-8")
+    req = urllib.request.Request(
+        url,
+        data=body,
+        method="POST",
+        headers={"Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            raw = json.loads(resp.read().decode("utf-8", errors="replace"))
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")
+        try:
+            j = json.loads(detail)
+            msg = (j.get("error") or {}).get("message") or detail
+        except Exception:
+            msg = detail
+        raise ValueError(
+            f"Gemini API HTTP {e.code}: {msg} "
+            f"(model={model!r}). Set GEMINI_MODEL in .env to a model your key supports, "
+            f"e.g. gemini-2.5-flash or gemini-2.5-pro (see https://ai.google.dev/gemini-api/docs/models )."
+        ) from e
+    candidates = raw.get("candidates") or []
+    if not candidates:
+        err = raw.get("error", {})
+        raise ValueError(err.get("message") or "Gemini returned no candidates")
+    parts = (candidates[0].get("content") or {}).get("parts") or []
+    if not parts:
+        raise ValueError("Gemini returned empty content")
+    return (parts[0].get("text") or "").strip()
+
+
+def _analyze_interviewer_personality(user_text, metrics=None):
+    """
+    Adaptive interviewer: soft + supportive if candidate seems to struggle;
+    more challenging if confident and fluent.
+    metrics: filler_count, pause_count, thinking_seconds_used, answer_seconds, timed_out (bool)
+    Returns (tts_tone, adaptation_label) where tts_tone is 'soft' | 'aggressive'.
+    """
+    metrics = metrics or {}
+    t = (user_text or "").strip()
+    words = t.split()
+    nw = len(words)
+    fillers_text = len(INTERVIEW_FILLER_RE.findall(t.lower()))
+    ratio = fillers_text / max(nw, 1) if nw else 0
+
+    fc = int(metrics.get("filler_count") or 0)
+    pc = int(metrics.get("pause_count") or 0)
+    timed_out = bool(metrics.get("timed_out"))
+    try:
+        ans_sec = float(metrics.get("answer_seconds") or 0)
+    except (TypeError, ValueError):
+        ans_sec = 0.0
+
+    # Prefer client-side acoustic-style signals when present
+    struggling = (
+        timed_out
+        or fc >= 4
+        or pc >= 6
+        or (fc >= 2 and pc >= 4)
+        or (nw > 8 and ratio > 0.14)
+        or (t.count("...") >= 2 and nw > 5)
+    )
+    confident = (
+        not timed_out
+        and nw >= 12
+        and fc <= 1
+        and pc <= 2
+        and ratio < 0.06
+        and ans_sec <= 52
+    )
+
+    if struggling and not confident:
+        return "soft", "struggling"
+    if confident and not struggling:
+        return "aggressive", "confident"
+    # Fallback: text-only heuristics
+    if not t:
+        return "soft", "neutral"
+    if (nw > 6 and ratio > 0.12) or fillers_text >= 3:
+        return "soft", "struggling"
+    if nw <= 22 and fillers_text == 0 and nw >= 4:
+        return "aggressive", "confident"
+    if ratio > 0.08 or fillers_text >= 2:
+        return "soft", "struggling"
+    return "aggressive", "neutral"
+
+
+def _format_answer_metrics_line(metrics):
+    if not metrics:
+        return ""
+    try:
+        fc = int(metrics.get("filler_count") or 0)
+        pc = int(metrics.get("pause_count") or 0)
+        th = float(metrics.get("thinking_seconds_used") or 0)
+        ans = float(metrics.get("answer_seconds") or 0)
+        to = bool(metrics.get("timed_out"))
+        return (
+            f" [Signals: filler_words≈{fc}, pause_gaps≈{pc}, "
+            f"thinking_time≈{th:.0f}s, answer_time≈{ans:.0f}s, timed_out={to}]"
+        )
+    except Exception:
+        return ""
+
+
+def _elevenlabs_tts_for_interview_tone(text, tone):
+    """ElevenLabs settings: nervous candidate → softer voice; confident → more direct."""
+    tone = (tone or "soft").lower()
+    if tone == "aggressive":
+        vid = os.environ.get("ELEVENLABS_VOICE_ID_AGGRESSIVE") or os.environ.get(
+            "ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM"
+        )
+        stab = float(os.environ.get("ELEVENLABS_STABILITY_AGGRESSIVE", "0.38"))
+        sim = float(os.environ.get("ELEVENLABS_SIMILARITY_AGGRESSIVE", "0.68"))
+    else:
+        vid = os.environ.get("ELEVENLABS_VOICE_ID_SOFT") or os.environ.get(
+            "ELEVENLABS_VOICE_ID", "21m00Tcm4TlvDq8ikWAM"
+        )
+        stab = float(os.environ.get("ELEVENLABS_STABILITY_SOFT", "0.62"))
+        sim = float(os.environ.get("ELEVENLABS_SIMILARITY_SOFT", "0.82"))
+    return _elevenlabs_synthesize(text, voice_id=vid, stability=stab, similarity=sim)
+
+
+def _format_interview_history(history):
+    lines = []
+    for h in history or []:
+        role = (h.get("role") or "").strip()
+        content = (h.get("content") or "").strip()
+        if not content:
+            continue
+        label = "Interviewer" if role == "assistant" else "Candidate"
+        extra = ""
+        if role == "user" and isinstance(h.get("meta"), dict):
+            extra = _format_answer_metrics_line(h["meta"])
+        lines.append(f"{label}: {content}{extra}")
+    return "\n".join(lines) if lines else "(No prior exchanges yet.)"
 
 
 # ================== Routes ==================
@@ -1511,6 +1803,246 @@ def health():
         "template_dir": TEMPLATE_DIR,
         "avhubert": avhubert_info,
     }), 200
+
+
+@app.route("/api/tts/tips", methods=["POST"])
+def api_tts_tips():
+    """Proxy ElevenLabs TTS so the API key stays on the server. Body: { \"text\": \"...\" }."""
+    data = request.get_json(silent=True) or {}
+    text = (data.get("text") or "").strip()
+    if not text:
+        text = (os.environ.get("ZARIYA_DEFAULT_TIPS_TEXT") or "").strip()
+    if not text:
+        return jsonify({"error": "No tips text provided"}), 400
+    if len(text) > 8000:
+        return jsonify({"error": "Text too long (max 8000 characters)"}), 400
+    try:
+        audio = _elevenlabs_synthesize(text)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 503
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")
+        print(f"[tts] ElevenLabs HTTP {e.code}: {detail[:500]}")
+        return jsonify(
+            {"error": "ElevenLabs request failed", "detail": detail[:300]}
+        ), 502
+    except Exception as e:
+        print(f"[tts] {e}")
+        traceback.print_exc()
+        return jsonify({"error": "TTS synthesis failed"}), 502
+    return Response(audio, mimetype="audio/mpeg")
+
+
+@app.route("/api/tts/interview", methods=["POST"])
+def api_tts_interview():
+    """ElevenLabs TTS with interview tone profile. Body: { \"text\": \"...\", \"tone\": \"soft\"|\"aggressive\" }."""
+    data = request.get_json(silent=True) or {}
+    text = (data.get("text") or "").strip()
+    if not text:
+        return jsonify({"error": "No text provided"}), 400
+    if len(text) > 8000:
+        return jsonify({"error": "Text too long (max 8000 characters)"}), 400
+    tone = (data.get("tone") or "soft").strip().lower()
+    if tone not in ("soft", "aggressive"):
+        tone = "soft"
+    try:
+        audio = _elevenlabs_tts_for_interview_tone(text, tone)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 503
+    except urllib.error.HTTPError as e:
+        detail = e.read().decode("utf-8", errors="replace")
+        print(f"[tts/interview] ElevenLabs HTTP {e.code}: {detail[:500]}")
+        return jsonify(
+            {"error": "ElevenLabs request failed", "detail": detail[:300]}
+        ), 502
+    except Exception as e:
+        print(f"[tts/interview] {e}")
+        traceback.print_exc()
+        return jsonify({"error": "TTS synthesis failed"}), 502
+    return Response(audio, mimetype="audio/mpeg")
+
+
+@app.route("/api/interview/turn", methods=["POST"])
+def api_interview_turn():
+    """
+    Next interviewer line (Gemini). Body:
+      user_text, history (list of {role, content, meta?}),
+      user_turn_index (0-based), max_questions (optional, default 4, clamped 3–5),
+      answer_metrics (optional): filler_count, pause_count, thinking_seconds_used,
+        answer_seconds, timed_out — used for adaptive tone + prompts.
+    """
+    data = request.get_json(silent=True) or {}
+    user_text = (data.get("user_text") or "").strip()
+    history = data.get("history") or []
+    answer_metrics = data.get("answer_metrics") if isinstance(data.get("answer_metrics"), dict) else {}
+    try:
+        user_turn_index = int(data.get("user_turn_index", 0))
+    except (TypeError, ValueError):
+        user_turn_index = 0
+    try:
+        max_questions = int(data.get("max_questions", 4))
+    except (TypeError, ValueError):
+        max_questions = 4
+    max_questions = max(3, min(5, max_questions))
+
+    if not user_text:
+        return jsonify({"error": "user_text is required"}), 400
+
+    tone, adaptation = _analyze_interviewer_personality(user_text, answer_metrics)
+    hist_block = _format_interview_history(history)
+    adapt_hint = ""
+    if adaptation == "struggling":
+        adapt_hint = (
+            "\nThe candidate seems hesitant or under pressure (use of fillers, pauses, or time pressure). "
+            "Be warm, supportive, and clear; ask one manageable follow-up without piling on."
+        )
+    elif adaptation == "confident":
+        adapt_hint = (
+            "\nThe candidate answered with clarity and fluency. Be professionally challenging: "
+            "probe assumptions, add a layer of depth, or ask a sharper follow-up."
+        )
+
+    # user_turn_index is 0-based for each candidate answer. After (max_questions - 1) we ask the last
+    # question; at >= max_questions we only deliver a closing (if the client sends an extra turn).
+    past_end = user_turn_index >= max_questions
+    last_question_turn = user_turn_index == max_questions - 1
+    try:
+        if past_end:
+            prompt = f"""You are a professional interviewer. The mock interview is finished.
+
+Conversation so far:
+{hist_block}
+
+The candidate's last answer was:
+"{user_text}"
+{adapt_hint}
+
+Give a brief, warm closing (2–3 sentences): thank them, one specific positive note, and invite them to review their summary. Do not ask another question.
+Output only the spoken lines, no quotes or labels."""
+            line = _gemini_generate_text(prompt, max_tokens=400)
+        elif last_question_turn:
+            prompt = f"""You are a professional interviewer. This is your LAST question in this session; after this you will wrap up.
+
+Previous exchanges:
+{hist_block}
+
+The candidate just said:
+"{user_text}"
+{adapt_hint}
+
+Ask ONE final relevant follow-up interview question (at most two short sentences). Make it count — insightful and specific. Do not say it is the last question aloud.
+
+Output only the question, no quotes or preamble."""
+            line = _gemini_generate_text(prompt, max_tokens=400)
+        else:
+            prompt = f"""You are a professional interviewer.
+
+Previous exchanges in this session:
+{hist_block}
+
+The candidate just said:
+"{user_text}"
+{adapt_hint}
+
+Based on the candidate's response above, ask ONE relevant follow-up interview question.
+Keep it concise, natural, and conversational (at most two short sentences).
+Do not repeat a question you already asked. Use the prior context.
+
+Output only the question, with no quotes or preamble."""
+            line = _gemini_generate_text(prompt, max_tokens=400)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 503
+    except Exception as e:
+        print(f"[interview/turn] {e}")
+        traceback.print_exc()
+        return jsonify({"error": "Could not generate interview line"}), 502
+
+    line = (line or "").strip()
+    if not line:
+        line = "Thank you for sharing that. What else should we know about your experience?"
+
+    interview_complete = bool(last_question_turn or past_end)
+
+    return jsonify(
+        {
+            "question": line,
+            "tone": tone,
+            "adaptation": adaptation,
+            "interview_complete": interview_complete,
+            "user_turn_index": user_turn_index,
+            "max_questions": max_questions,
+        }
+    )
+
+
+@app.route("/api/interview/report", methods=["POST"])
+def api_interview_report():
+    """Structured report from transcript. Body: { \"transcript\": [ {role, content, meta?}, ... ] }."""
+    data = request.get_json(silent=True) or {}
+    transcript = data.get("transcript") or []
+    lines = []
+    for t in transcript:
+        role = (t.get("role") or "").strip()
+        content = (t.get("content") or "").strip()
+        if not content:
+            continue
+        label = "Interviewer" if role == "assistant" else "Candidate"
+        extra = ""
+        if role == "user" and isinstance(t.get("meta"), dict):
+            extra = _format_answer_metrics_line(t["meta"])
+        lines.append(f"{label}: {content}{extra}")
+    block = "\n".join(lines) if lines else "(empty)"
+    try:
+        prompt = f"""You are an interview coach. Given this mock interview transcript, write a concise report with these sections:
+
+1) Summary — 2–3 sentences
+2) Strengths — bullet list, 2–4 items
+3) Areas to improve — bullet list, 2–4 items (consider filler words, pauses, and answer timing shown in [Signals] for each answer when present)
+4) Suggested next practice focus — 1–2 sentences
+
+When [Signals] lines appear after a candidate turn, use them to judge pacing and clarity (e.g. many pauses or fillers vs. concise answers within time limits).
+
+Transcript:
+{block}
+
+Use clear markdown headings (##) and bullet points."""
+        report = _gemini_generate_text(prompt, max_tokens=2048)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 503
+    except Exception as e:
+        print(f"[interview/report] {e}")
+        traceback.print_exc()
+        return jsonify({"error": "Report generation failed"}), 502
+    return jsonify({"report_markdown": report.strip()})
+
+
+@app.route("/api/interview/replay_feedback", methods=["POST"])
+def api_interview_replay_feedback():
+    """
+    Script for voice replay: repeat answer + critique. Body: { \"answer_text\": \"...\" }.
+    """
+    data = request.get_json(silent=True) or {}
+    answer = (data.get("answer_text") or "").strip()
+    if not answer:
+        return jsonify({"error": "answer_text is required"}), 400
+    try:
+        prompt = f"""The candidate said this in an interview:
+\"\"\"{answer}\"\"\"
+
+Write a short voiceover script for feedback (under 120 words) with three parts in order:
+1) One sentence like "Here's how that came across."
+2) Repeat or paraphrase their answer in first person as if you are them (one or two sentences), so they hear it played back.
+3) Brief critique: mention hesitation, fillers, or clarity — be constructive.
+
+Use conversational English only. No stage directions or bullet points."""
+        script = _gemini_generate_text(prompt, max_tokens=500)
+    except ValueError as e:
+        return jsonify({"error": str(e)}), 503
+    except Exception as e:
+        print(f"[interview/replay] {e}")
+        traceback.print_exc()
+        return jsonify({"error": "Replay script failed"}), 502
+    return jsonify({"script": (script or "").strip()})
 
 
 @app.route("/process_frame", methods=["POST"])
@@ -1614,18 +2146,22 @@ def recording_status():
 @app.route("/send_report", methods=["POST"])
 def send_report_endpoint():
     """
-    Endpoint to send session report via email
-    
+    Endpoint to send session report via email.
+
+    Configure SENDER_EMAIL + EMAIL_PASSWORD (Gmail: App Password). Optional: SMTP_SERVER, SMTP_PORT, SMTP_USE_SSL=1.
+
     Expected JSON:
     {
         "email": "user@example.com",
         "report_data": {
-            "predictions": [...],
-            "emotions": [...],
-            "duration": "5m 23s",
-            "frame_count": 1234
+            "overall_score": 0-100 or null,
+            "sentence_results": [{"text", "count", "score", "label"}],
+            "key_feedback": ["..."],
+            "best_attempt": {"text", "score"} or null,
+            "patient_name", "patient_id", "duration", "session_notes",
+            "emotions": [...]
         },
-        "session_id": "optional-session-id"
+        "session_id": "optional"
     }
     """
     try:

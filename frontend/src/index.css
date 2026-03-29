@@ -196,3 +196,10 @@ button:hover svg {
     font-size: 1.5rem !important;
   }
 }
+
+/* ElevenLabs ConvAI embed (Mode 2 — Unpanic me) */
+.convai-widget-host elevenlabs-convai {
+  display: block;
+  width: 100%;
+  min-height: 120px;
+}

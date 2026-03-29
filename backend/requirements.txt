@@ -1,6 +1,7 @@
 # Core API
 flask>=3.0
 flask-cors
+python-dotenv>=1.0
 itsdangerous
 werkzeug
 

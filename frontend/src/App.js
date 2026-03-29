@@ -1,12 +1,18 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Mail, Camera, Square, Mic, Volume2, AlertCircle, Activity, Zap, Heart, Brain, FileText, Download, User, Stethoscope, Clock, TrendingUp, Award, Target, LogOut, Loader2, ListChecks, ArrowLeft } from 'lucide-react';
+import { Mail, Camera, Square, Mic, Volume2, AlertCircle, Activity, Zap, Heart, FileText, Download, Stethoscope, Clock, Award, LogOut, Loader2, ListChecks, ArrowLeft, Lightbulb } from 'lucide-react';
 import ZariyaLandingPage from './home';
 import ModeSelect from './ModeSelect';
+import InterviewMode from './InterviewMode';
+import UnpanicMode from './UnpanicMode';
 import Auth from './Auth';
 import { API_BASE, loadStoredAuth, clearAuth, fetchMe } from './api';
 
 // How often we POST a video frame to /process_frame. Larger = slower buffer fill → longer before each prediction (pairs with backend ZARIYA_FRAME_BUFFER_SIZE).
 const FRAME_SEND_INTERVAL_MS = 100;
+
+/** Tips read aloud via ElevenLabs when the user taps Tips. Replace with your final copy. */
+const SESSION_TIPS_TEXT =
+  'Welcome to your session. Sit in good light, face the camera, and speak with clear lip movements. Take your time between phrases.';
 
 const EMOTION_EMOTICONS = {
   happy: "😊",
@@ -17,6 +23,105 @@ const EMOTION_EMOTICONS = {
   fearful: "😨",
   disgusted: "🤢"
 };
+
+function labelForSentenceScore(score) {
+  if (score == null || Number.isNaN(score)) return '—';
+  if (score > 80) return 'Good';
+  if (score >= 60) return 'Okay';
+  return 'Needs Work';
+}
+
+function formatClockFromSeconds(seconds) {
+  const mins = Math.floor(seconds / 60);
+  const secs = seconds % 60;
+  return `${mins}:${secs.toString().padStart(2, '0')}`;
+}
+
+/** Aggregates Mode 4 session data for report UI, download, and email. */
+function buildStructuredReportData({
+  allPredictions,
+  emotionHistory,
+  sessionDurationSeconds,
+  sessionNotes,
+  patientName,
+  patientId,
+  frameCount,
+}) {
+  const withScores = allPredictions.filter((p) => typeof p.dtwScore === 'number');
+  const overall_score =
+    withScores.length > 0
+      ? Math.round(withScores.reduce((s, p) => s + p.dtwScore, 0) / withScores.length)
+      : null;
+
+  const bySentence = new Map();
+  for (const p of allPredictions) {
+    const key = p.text;
+    if (!bySentence.has(key)) {
+      bySentence.set(key, { text: key, scores: [], count: 0 });
+    }
+    const e = bySentence.get(key);
+    e.count += 1;
+    if (typeof p.dtwScore === 'number') e.scores.push(p.dtwScore);
+  }
+
+  const sentence_results = Array.from(bySentence.values()).map((e) => {
+    const sc =
+      e.scores.length > 0
+        ? Math.round(e.scores.reduce((a, b) => a + b, 0) / e.scores.length)
+        : null;
+    return {
+      text: e.text,
+      count: e.count,
+      score: sc,
+      label: sc != null ? labelForSentenceScore(sc) : '—',
+    };
+  });
+
+  let best_attempt = null;
+  for (const row of sentence_results) {
+    if (row.score != null) {
+      if (!best_attempt || row.score > best_attempt.score) {
+        best_attempt = { text: row.text, score: row.score };
+      }
+    }
+  }
+
+  const tips = [];
+  if (withScores.length === 0 && allPredictions.length > 0) {
+    tips.push('Lip similarity scores were not available for this session (e.g. non-template mode).');
+  } else if (withScores.length === 0) {
+    tips.push('No matched phrases yet — try speaking a calibrated sentence clearly.');
+  } else {
+    if (overall_score < 60) tips.push('Unclear lip movement');
+    const timingHeavy = withScores.filter(
+      (p) =>
+        typeof p.linearSimilarity === 'number' &&
+        typeof p.dtwSimilarity === 'number' &&
+        p.dtwSimilarity - p.linearSimilarity > 0.08
+    );
+    if (timingHeavy.length > withScores.length * 0.35) tips.push('Timing mismatch');
+    if (withScores.some((p) => p.margin != null && p.margin < 0.06)) {
+      tips.push('Some attempts were ambiguous — slow down between phrases.');
+    }
+    if (overall_score >= 80) tips.push('Good articulation');
+    else if (tips.length < 2 && overall_score >= 60) tips.push('Keep practicing — you are on the right track.');
+  }
+
+  const key_feedback = [...new Set(tips)].slice(0, 3);
+
+  return {
+    overall_score,
+    sentence_results,
+    key_feedback,
+    best_attempt,
+    patient_name: patientName,
+    patient_id: patientId,
+    duration: formatClockFromSeconds(sessionDurationSeconds || 0),
+    session_notes: sessionNotes,
+    emotions: emotionHistory.map((e) => (typeof e === 'object' ? e.emotion : e)),
+    frame_count: frameCount,
+  };
+}
 
 export default function MedicalLipReadingApp() {
   const [authSession, setAuthSession] = useState(null);
@@ -50,13 +155,17 @@ export default function MedicalLipReadingApp() {
   const [patientId, setPatientId] = useState('');
   const [sessionNotes, setSessionNotes] = useState('');
   const [emotionDetectionStatus, setEmotionDetectionStatus] = useState('loading');
+  const [lastDtwScore, setLastDtwScore] = useState(null);
+  const [sessionDtwScores, setSessionDtwScores] = useState([]);
 
   const [calibrationSentences, setCalibrationSentences] = useState([]);
   const [calibrationMessage, setCalibrationMessage] = useState('');
   const [recordingSentenceId, setRecordingSentenceId] = useState(null);
   const [calibrationBusy, setCalibrationBusy] = useState(false);
+  const [tipsLoading, setTipsLoading] = useState(false);
 
   const videoRef = useRef(null);
+  const tipsAudioRef = useRef(null);
   const canvasRef = useRef(null);
   const overlayRef = useRef(null);
   const streamRef = useRef(null);
@@ -72,6 +181,56 @@ export default function MedicalLipReadingApp() {
       }
     } catch {
       /* ignore */
+    }
+  };
+
+  const playSessionTips = async () => {
+    if (!SESSION_TIPS_TEXT.trim()) {
+      setErrorMsg('Add your tips text in SESSION_TIPS_TEXT (App.js).');
+      return;
+    }
+    if (tipsAudioRef.current) {
+      tipsAudioRef.current.pause();
+      tipsAudioRef.current.src = '';
+      tipsAudioRef.current = null;
+    }
+    setTipsLoading(true);
+    setErrorMsg('');
+    try {
+      const resp = await fetch(`${API_BASE}/api/tts/tips`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: SESSION_TIPS_TEXT }),
+      });
+      const contentType = resp.headers.get('content-type') || '';
+      if (!resp.ok) {
+        let msg = `Tips audio failed (${resp.status})`;
+        if (contentType.includes('application/json')) {
+          const err = await resp.json().catch(() => ({}));
+          if (err.error) msg = err.error;
+          if (err.detail) msg = `${msg}: ${err.detail}`;
+        }
+        setErrorMsg(msg);
+        return;
+      }
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const audio = new Audio(url);
+      tipsAudioRef.current = audio;
+      audio.onended = () => {
+        URL.revokeObjectURL(url);
+        tipsAudioRef.current = null;
+      };
+      audio.onerror = () => {
+        URL.revokeObjectURL(url);
+        tipsAudioRef.current = null;
+        setErrorMsg('Could not play tips audio.');
+      };
+      await audio.play();
+    } catch (e) {
+      setErrorMsg(e.message || 'Could not load tips audio. Is the server running?');
+    } finally {
+      setTipsLoading(false);
     }
   };
 
@@ -124,6 +283,8 @@ export default function MedicalLipReadingApp() {
       setPredictionsReceived(0);
       setAllPredictions([]);
       setEmotionHistory([]);
+      setSessionDtwScores([]);
+      setLastDtwScore(null);
       setSessionDuration(0);
       setPrediction('');
       setPredictionSource('');
@@ -306,48 +467,24 @@ const handleEmailReport = async () => {
   }
   
   try {
-    // ✅ Format predictions properly
-    const formattedPredictions = allPredictions.map((pred, idx) => {
-      // Handle different prediction formats
-      let word = 'N/A';
-      let timestamp = 'N/A';
-      let confidence = 0;
-      
-      if (typeof pred === 'string') {
-        word = pred;
-        timestamp = formatTime(idx * 3); // Estimate 3 seconds per prediction
-        confidence = 90;
-      } else if (pred && typeof pred === 'object') {
-        word = pred.word || pred.prediction || pred.text || 'N/A';
-        timestamp = pred.timestamp || formatTime(idx * 3);
-        confidence = pred.confidence || 85;
-      }
-      
-      return {
-        word: word,
-        timestamp: timestamp,
-        confidence: confidence
-      };
+    const structured = buildStructuredReportData({
+      allPredictions,
+      emotionHistory,
+      sessionDurationSeconds: sessionDuration,
+      sessionNotes,
+      patientName,
+      patientId,
+      frameCount,
     });
-    
-    // ✅ Format emotions properly
-    const formattedEmotions = emotionHistory.map(e => 
-      typeof e === 'string' ? e : (e.emotion || 'neutral')
-    );
-    
+
     const response = await fetch(`${API_BASE}/send_report`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         email: email,
-        report_data: {
-          predictions: formattedPredictions,
-          emotions: formattedEmotions,
-          duration: formatDuration(Date.now() - sessionStartTime),
-          frame_count: frameCount
-        },
-        session_id: `session-${Date.now()}`
-      })
+        report_data: structured,
+        session_id: `session-${Date.now()}`,
+      }),
     });
     
     const result = await response.json();
@@ -427,22 +564,34 @@ const formatTime = (seconds) => {
       setPrediction(newPred);
       setPredictionSource(data.prediction_source || '');
       setPredictionsReceived(prev => prev + 1);
-      
+
+      const lm = data.lip_match;
+      const dtw100 = lm && typeof lm.score_100 === 'number' ? lm.score_100 : null;
+      if (dtw100 != null) {
+        setLastDtwScore(dtw100);
+        setSessionDtwScores((prev) => [...prev, dtw100].slice(-80));
+      }
+
       setAllPredictions(prev => [
-        { 
-          text: newPred, 
-          timestamp: Date.now(), 
+        {
+          text: newPred,
+          timestamp: Date.now(),
           id: data.prediction_number || prev.length + 1,
           emotion: currentEmotion,
-          emotionConfidence: emotionConfidence
+          emotionConfidence: emotionConfidence,
+          dtwScore: dtw100,
+          dtwSimilarity: lm?.dtw_similarity ?? null,
+          linearSimilarity: lm?.linear_similarity ?? null,
+          margin: lm?.margin ?? null,
         },
         ...prev
       ].slice(0, 50));
 
       setIsWaitingForMovement(false);
       const src = data.prediction_source || 'lip_camera';
+      const scoreHint = dtw100 != null ? ` · DTW match ${dtw100}/100` : '';
       setDebugInfo(
-        `✓ Prediction #${data.prediction_number || predictionsReceived + 1}: "${newPred}" (${src} — camera mouth ROI, no TTS)`
+        `✓ Prediction #${data.prediction_number || predictionsReceived + 1}: "${newPred}" (${src}${scoreHint} — camera mouth ROI)`
       );
     }
   };
@@ -505,9 +654,15 @@ const formatTime = (seconds) => {
   };
 
   const generateReport = () => {
-    const uniqueWords = new Set(
-      allPredictions.flatMap(p => p.text.toLowerCase().split(' '))
-    ).size;
+    const structured = buildStructuredReportData({
+      allPredictions,
+      emotionHistory,
+      sessionDurationSeconds: sessionDuration,
+      sessionNotes,
+      patientName,
+      patientId,
+      frameCount,
+    });
 
     const emotionCounts = emotionHistory.reduce((acc, e) => {
       acc[e.emotion] = (acc[e.emotion] || 0) + 1;
@@ -522,63 +677,70 @@ const formatTime = (seconds) => {
       : 0;
 
     return {
+      ...structured,
       totalPredictions: allPredictions.length,
-      uniqueWords,
-      sessionDuration: formatDuration(sessionDuration),
+      sessionDuration: structured.duration,
       dominantEmotion,
       emotionCounts,
       avgConfidence,
       predictions: allPredictions,
-      emotionHistory
+      emotionHistory,
     };
   };
 
   const downloadReport = () => {
-    const report = generateReport();
+    const r = generateReport();
+    const overall =
+      r.overall_score != null ? `${r.overall_score}/100` : 'N/A (no DTW scores this session)';
+    const sentences = (r.sentence_results || [])
+      .map(
+        (row) =>
+          `- "${row.text}"\n  Times: ${row.count}  Score: ${row.score != null ? row.score : '—'}  ${row.label}`
+      )
+      .join('\n');
+    const feedback = (r.key_feedback || []).map((t) => `• ${t}`).join('\n');
+    const best = r.best_attempt
+      ? `"${r.best_attempt.text}" (${r.best_attempt.score}/100)`
+      : '—';
+
     const reportText = `
-Zariya
-===================================
+Zariya — Practice session report
+================================
+Date: ${new Date().toLocaleString()}
 
-Patient Information:
-- Name: ${patientName || 'Not provided'}
-- ID: ${patientId || 'Not provided'}
-- Date: ${new Date().toLocaleString()}
-- Session Duration: ${report.sessionDuration}
+Patient: ${patientName || '—'}  |  ID: ${patientId || '—'}
+Session duration: ${r.duration}
+Frames sent: ${frameCount}
 
-Session Summary:
-- Total Phrases Practiced: ${report.totalPredictions}
-- Unique Words: ${report.uniqueWords}
-- Dominant Emotion: ${report.dominantEmotion} ${EMOTION_EMOTICONS[report.dominantEmotion]}
-- Average Emotion Confidence: ${report.avgConfidence}%
+1) Overall score (DTW similarity, 0–100)
+${overall}
 
-Emotion Distribution:
-${Object.entries(report.emotionCounts).map(([emotion, count]) => 
-  `- ${emotion}: ${count} detections ${EMOTION_EMOTICONS[emotion]}`
-).join('\n')}
+2) Sentence results
+${sentences || '(none)'}
 
-Practice History with Emotions:
-${report.predictions.map((p, i) => 
-  `${i + 1}. "${p.text}" - ${new Date(p.timestamp).toLocaleTimeString()} [${p.emotion} ${EMOTION_EMOTICONS[p.emotion]} ${p.emotionConfidence}%]`
-).join('\n')}
+3) Key feedback
+${feedback || '—'}
 
-Emotion Timeline (Server ML Detection):
-${report.emotionHistory.map((e, i) => 
-  `${i + 1}. ${new Date(e.timestamp).toLocaleTimeString()} - ${e.emotion} ${EMOTION_EMOTICONS[e.emotion]} (${e.confidence}%)`
-).join('\n')}
+4) Best attempt
+${best}
 
-Clinical Notes:
-${sessionNotes || 'No notes provided.'}
+— Emotions (overview) —
+Dominant: ${r.dominantEmotion} ${EMOTION_EMOTICONS[r.dominantEmotion] || ''}
+Avg. confidence: ${r.avgConfidence}%
+
+Clinical notes:
+${sessionNotes || '—'}
 
 ---
-Generated by Medical Lip Reading System with ML Emotion Detection (FER)
-Emotion Detection: ${emotionDetectionStatus === 'ready' ? 'Enabled (Server-side ML - 5s intervals)' : 'Unavailable'}
+Zariya · Lip-reading practice
+Emotion detection: ${emotionDetectionStatus === 'ready' ? 'available (server)' : 'unavailable'}
     `.trim();
 
     const blob = new Blob([reportText], { type: 'text/plain' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
     a.href = url;
-    a.download = `lip-reading-report-${Date.now()}.txt`;
+    a.download = `zariya-session-report-${Date.now()}.txt`;
     a.click();
     URL.revokeObjectURL(url);
   };
@@ -596,6 +758,11 @@ Emotion Detection: ${emotionDetectionStatus === 'ready' ? 'Enabled (Server-side 
   const emotionStatusColor = emotionDetectionStatus === 'ready' ? 'bg-green-500'
                             : emotionDetectionStatus === 'loading' ? 'bg-yellow-500'
                             : 'bg-red-500';
+
+  const sessionAvgDtwLive =
+    sessionDtwScores.length > 0
+      ? Math.round(sessionDtwScores.reduce((a, b) => a + b, 0) / sessionDtwScores.length)
+      : null;
 
   useEffect(() => {
     let cancelled = false;
@@ -646,7 +813,7 @@ Emotion Detection: ${emotionDetectionStatus === 'ready' ? 'Enabled (Server-side 
       <span className="text-gray-300 text-sm max-w-[180px] truncate hidden sm:inline">
         {authSession.user?.name || authSession.user?.email}
       </span>
-      {selectedAppMode === 4 && (
+      {(selectedAppMode === 4 || selectedAppMode === 1 || selectedAppMode === 2) && (
         <button
           type="button"
           onClick={goToModeSelect}
@@ -692,176 +859,226 @@ Emotion Detection: ${emotionDetectionStatus === 'ready' ? 'Enabled (Server-side 
 
   if (selectedAppMode === 4 && showReport) {
     const report = generateReport();
-    
+    const sessionAvgDtw =
+      sessionDtwScores.length > 0
+        ? Math.round(sessionDtwScores.reduce((a, b) => a + b, 0) / sessionDtwScores.length)
+        : null;
+
     return (
       <>
         {authBar}
       <div className="min-h-screen bg-gradient-to-br from-slate-900 via-blue-900 to-slate-900 p-4 sm:p-8">
-        <div className="max-w-5xl mx-auto">
-          <div className="bg-white/10 backdrop-blur-md rounded-xl shadow-2xl border border-white/20 p-8">
-            <div className="flex items-center justify-between mb-6">
+        <div className="max-w-3xl mx-auto">
+          <div className="bg-white/10 backdrop-blur-md rounded-xl shadow-2xl border border-white/20 p-6 sm:p-8">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-8">
               <div className="flex items-center gap-3">
-                <div className="bg-gradient-to-r from-green-500 to-blue-600 p-3 rounded-2xl">
-                  <FileText size={32} className="text-white" />
+                <div className="bg-gradient-to-r from-indigo-500 to-violet-600 p-3 rounded-2xl">
+                  <FileText size={28} className="text-white" />
                 </div>
                 <div>
-                  <h1 className="text-3xl font-bold text-white">Session Report</h1>
-                  <p className="text-gray-300 text-sm">{new Date().toLocaleString()}</p>
+                  <h1 className="text-2xl sm:text-3xl font-bold text-white">Session report</h1>
+                  <p className="text-gray-400 text-sm">{new Date().toLocaleString()}</p>
                 </div>
               </div>
               <button
+                type="button"
                 onClick={() => setShowReport(false)}
-                className="px-4 py-2 bg-blue-500 hover:bg-blue-600 rounded-lg text-white font-medium"
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-white text-sm font-medium"
               >
-                New Session
+                New session
               </button>
             </div>
 
-            <div className="bg-white/5 rounded-lg p-6 mb-6">
-              <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
-                <User size={20} className="text-blue-400" />
-                Patient Information
-              </h2>
+            <div className="bg-white/5 rounded-xl p-5 mb-6 border border-white/10">
+              <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">Patient</h2>
               <div className="grid sm:grid-cols-2 gap-4">
                 <div>
-                  <label className="text-gray-400 text-sm">Patient Name</label>
+                  <label className="text-gray-500 text-xs">Name</label>
                   <input
                     type="text"
                     value={patientName}
                     onChange={(e) => setPatientName(e.target.value)}
-                    placeholder="Enter name"
-                    className="w-full mt-1 px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white"
+                    placeholder="Optional"
+                    className="w-full mt-1 px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white text-sm"
                   />
                 </div>
                 <div>
-                  <label className="text-gray-400 text-sm">Patient ID</label>
+                  <label className="text-gray-500 text-xs">ID</label>
                   <input
                     type="text"
                     value={patientId}
                     onChange={(e) => setPatientId(e.target.value)}
-                    placeholder="Enter ID"
-                    className="w-full mt-1 px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white"
+                    placeholder="Optional"
+                    className="w-full mt-1 px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white text-sm"
                   />
                 </div>
               </div>
             </div>
 
-            <div className="grid sm:grid-cols-4 gap-4 mb-6">
-              <div className="bg-gradient-to-br from-blue-500/20 to-blue-600/20 rounded-lg p-4 border border-blue-500/30">
-                <div className="flex items-center gap-2 mb-2">
-                  <Target className="text-blue-400" size={20} />
-                  <span className="text-gray-300 text-sm">Phrases</span>
-                </div>
-                <p className="text-3xl font-bold text-white">{report.totalPredictions}</p>
-              </div>
-              <div className="bg-gradient-to-br from-green-500/20 to-green-600/20 rounded-lg p-4 border border-green-500/30">
-                <div className="flex items-center gap-2 mb-2">
-                  <Award className="text-green-400" size={20} />
-                  <span className="text-gray-300 text-sm">Unique Words</span>
-                </div>
-                <p className="text-3xl font-bold text-white">{report.uniqueWords}</p>
-              </div>
-              <div className="bg-gradient-to-br from-purple-500/20 to-purple-600/20 rounded-lg p-4 border border-purple-500/30">
-                <div className="flex items-center gap-2 mb-2">
-                  <Clock className="text-purple-400" size={20} />
-                  <span className="text-gray-300 text-sm">Duration</span>
-                </div>
-                <p className="text-3xl font-bold text-white">{report.sessionDuration}</p>
-              </div>
-              <div className="bg-gradient-to-br from-pink-500/20 to-pink-600/20 rounded-lg p-4 border border-pink-500/30">
-                <div className="flex items-center gap-2 mb-2">
-                  <Heart className="text-pink-400" size={20} />
-                  <span className="text-gray-300 text-sm">Mood</span>
-                </div>
-                <p className="text-4xl font-bold">{EMOTION_EMOTICONS[report.dominantEmotion]}</p>
-                <p className="text-xs text-gray-400 mt-1">{report.avgConfidence}% avg</p>
+            <div className="rounded-2xl border border-indigo-500/30 bg-gradient-to-br from-indigo-500/15 to-slate-900/40 p-6 mb-6 text-center">
+              <p className="text-gray-400 text-sm mb-1">1) Overall score</p>
+              <p className="text-5xl font-bold text-white tabular-nums">
+                {report.overall_score != null ? report.overall_score : '—'}
+              </p>
+              <p className="text-xs text-gray-500 mt-2">
+                From DTW lip-template similarity (0–100)
+                {sessionAvgDtw != null && (
+                  <span className="block text-indigo-300/90 mt-1">
+                    Running session average: {sessionAvgDtw}
+                  </span>
+                )}
+              </p>
+            </div>
+
+            <div className="mb-6">
+              <h2 className="text-white font-semibold mb-3 flex items-center gap-2">
+                <ListChecks size={18} className="text-amber-400" />
+                2) Sentence results
+              </h2>
+              <div className="rounded-xl border border-white/10 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-white/5 text-left text-gray-400 text-xs uppercase">
+                      <th className="px-4 py-2 font-medium">Sentence</th>
+                      <th className="px-4 py-2 font-medium w-10">×</th>
+                      <th className="px-4 py-2 font-medium w-14">Score</th>
+                      <th className="px-4 py-2 font-medium w-28">Label</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {(report.sentence_results || []).length === 0 ? (
+                      <tr>
+                        <td colSpan={4} className="px-4 py-6 text-center text-gray-500">
+                          No sentences matched this session
+                        </td>
+                      </tr>
+                    ) : (
+                      (report.sentence_results || []).map((row) => (
+                        <tr key={row.text} className="border-t border-white/10">
+                          <td className="px-4 py-3 text-white">{row.text}</td>
+                          <td className="px-4 py-3 text-gray-300 tabular-nums">{row.count}</td>
+                          <td className="px-4 py-3 text-gray-200 tabular-nums">
+                            {row.score != null ? row.score : '—'}
+                          </td>
+                          <td className="px-4 py-3">
+                            <span
+                              className={`text-xs font-medium px-2 py-0.5 rounded ${
+                                row.label === 'Good'
+                                  ? 'bg-emerald-500/20 text-emerald-300'
+                                  : row.label === 'Okay'
+                                  ? 'bg-amber-500/20 text-amber-200'
+                                  : row.label === '—'
+                                  ? 'bg-white/10 text-gray-400'
+                                  : 'bg-rose-500/20 text-rose-200'
+                              }`}
+                            >
+                              {row.label}
+                            </span>
+                          </td>
+                        </tr>
+                      ))
+                    )}
+                  </tbody>
+                </table>
               </div>
             </div>
 
-            <div className="bg-white/5 rounded-lg p-6 mb-6">
-              <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
-                <Brain size={20} className="text-purple-400" />
-                Emotional Analysis (ML Detection - Server-side FER)
+            <div className="bg-white/5 rounded-xl p-5 mb-6 border border-white/10">
+              <h2 className="text-white font-semibold mb-3 flex items-center gap-2">
+                <Zap size={18} className="text-yellow-400" />
+                3) Key feedback
               </h2>
-              <div className="space-y-3">
+              <ul className="space-y-2 text-gray-300 text-sm">
+                {(report.key_feedback || []).map((line, i) => (
+                  <li key={i} className="flex gap-2">
+                    <span className="text-indigo-400">•</span>
+                    <span>{line}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+
+            <div className="rounded-xl border border-emerald-500/30 bg-emerald-500/10 p-5 mb-6">
+              <h2 className="text-emerald-200 font-semibold mb-2 flex items-center gap-2">
+                <Award size={18} />
+                4) Best attempt
+              </h2>
+              {report.best_attempt ? (
+                <>
+                  <p className="text-white text-lg font-medium">{report.best_attempt.text}</p>
+                  <p className="text-emerald-300/90 text-sm mt-1">
+                    Score {report.best_attempt.score}/100
+                  </p>
+                </>
+              ) : (
+                <p className="text-gray-500 text-sm">No scored attempts yet</p>
+              )}
+            </div>
+
+            <div className="bg-white/5 rounded-xl p-5 mb-6 border border-white/10">
+              <h2 className="text-white font-semibold mb-3 flex items-center gap-2">
+                <Heart size={18} className="text-pink-400" />
+                Emotions (overview)
+              </h2>
+              <p className="text-gray-300 text-sm mb-2">
+                Dominant:{' '}
+                <span className="text-white capitalize">{report.dominantEmotion}</span>{' '}
+                {EMOTION_EMOTICONS[report.dominantEmotion]}
+                <span className="text-gray-500 text-xs ml-2">
+                  ({report.avgConfidence}% avg confidence)
+                </span>
+              </p>
+              <div className="flex flex-wrap gap-2 mt-2">
                 {Object.entries(report.emotionCounts).map(([emotion, count]) => (
-                  <div key={emotion} className="flex items-center gap-3">
-                    <span className="text-3xl">{EMOTION_EMOTICONS[emotion]}</span>
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between mb-1">
-                        <span className="text-white capitalize">{emotion}</span>
-                        <span className="text-gray-400 text-sm">{count} detections ({Math.round((count / report.emotionHistory.length) * 100)}%)</span>
-                      </div>
-                      <div className="w-full bg-white/10 rounded-full h-2">
-                        <div 
-                          className="bg-gradient-to-r from-blue-500 to-purple-500 h-2 rounded-full transition-all duration-300"
-                          style={{ width: `${(count / report.emotionHistory.length) * 100}%` }}
-                        />
-                      </div>
-                    </div>
-                  </div>
+                  <span
+                    key={emotion}
+                    className="text-xs px-2 py-1 rounded-full bg-white/10 text-gray-300 capitalize"
+                  >
+                    {emotion} {EMOTION_EMOTICONS[emotion]} {count}
+                  </span>
                 ))}
               </div>
             </div>
 
-            <div className="bg-white/5 rounded-lg p-6 mb-6">
-              <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
-                <TrendingUp size={20} className="text-green-400" />
-                Practice History with Emotions
-              </h2>
-              <div className="max-h-64 overflow-y-auto space-y-2">
-                {report.predictions.map((p, i) => (
-                  <div key={p.id} className="bg-white/5 rounded-lg p-3 flex items-center justify-between hover:bg-white/10 transition-colors">
-                    <div className="flex items-center gap-3">
-                      <span className="text-2xl">{EMOTION_EMOTICONS[p.emotion]}</span>
-                      <div>
-                        <p className="text-white font-medium">{p.text}</p>
-                        <p className="text-gray-400 text-xs">
-                          {new Date(p.timestamp).toLocaleTimeString()} • {p.emotion} ({p.emotionConfidence}%)
-                        </p>
-                      </div>
-                    </div>
-                    <span className="text-gray-500 text-sm">#{i + 1}</span>
-                  </div>
-                ))}
-              </div>
-            </div>
-
-            <div className="bg-white/5 rounded-lg p-6 mb-6">
-              <h2 className="text-xl font-semibold text-white mb-4 flex items-center gap-2">
-                <Stethoscope size={20} className="text-red-400" />
-                Clinical Notes
+            <div className="bg-white/5 rounded-xl p-5 mb-6 border border-white/10">
+              <h2 className="text-white font-semibold mb-3 flex items-center gap-2">
+                <Stethoscope size={18} className="text-sky-400" />
+                Clinical notes
               </h2>
               <textarea
                 value={sessionNotes}
                 onChange={(e) => setSessionNotes(e.target.value)}
-                placeholder="Add clinical observations, recommendations, or notes..."
-                className="w-full h-32 px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-500 resize-none"
+                placeholder="Observations or recommendations…"
+                className="w-full h-28 px-4 py-3 bg-white/10 border border-white/20 rounded-lg text-white placeholder-gray-500 resize-none text-sm"
               />
             </div>
 
-            <div className="flex gap-4">
+            <div className="flex flex-col sm:flex-row gap-3">
               <button
+                type="button"
                 onClick={downloadReport}
-                className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-green-500 to-blue-600 hover:from-green-600 hover:to-blue-700 rounded-lg text-white font-medium shadow-lg"
+                className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 rounded-lg text-white font-medium"
               >
                 <Download size={20} />
-                Download Report
+                Download report
               </button>
-
               <button
+                type="button"
                 onClick={handleEmailReport}
-                className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-purple-500 to-pink-600 hover:from-purple-600 hover:to-pink-700 rounded-lg text-white font-medium shadow-lg"
+                className="flex-1 flex items-center justify-center gap-2 px-6 py-3 bg-gradient-to-r from-violet-600 to-fuchsia-600 hover:from-violet-500 hover:to-fuchsia-500 rounded-lg text-white font-medium"
               >
                 <Mail size={20} />
-                Email Report
+                Email report
               </button>
               <button
+                type="button"
                 onClick={() => {
                   setShowReport(false);
                   setAllPredictions([]);
                   setEmotionHistory([]);
                   setSessionNotes('');
+                  setSessionDtwScores([]);
+                  setLastDtwScore(null);
                 }}
                 className="px-6 py-3 bg-white/10 hover:bg-white/20 border border-white/20 rounded-lg text-white font-medium"
               >
@@ -875,7 +1092,25 @@ Emotion Detection: ${emotionDetectionStatus === 'ready' ? 'Enabled (Server-side 
     );
   }
 
-  if (selectedAppMode === 1 || selectedAppMode === 2 || selectedAppMode === 3) {
+  if (selectedAppMode === 1) {
+    return (
+      <>
+        {authBar}
+        <InterviewMode onBack={() => setSelectedAppMode(null)} />
+      </>
+    );
+  }
+
+  if (selectedAppMode === 2) {
+    return (
+      <>
+        {authBar}
+        <UnpanicMode onBack={() => setSelectedAppMode(null)} />
+      </>
+    );
+  }
+
+  if (selectedAppMode === 3) {
     return (
       <>
         {authBar}
@@ -974,26 +1209,42 @@ Emotion Detection: ${emotionDetectionStatus === 'ready' ? 'Enabled (Server-side 
              
               
             </div>
-            <button
-              onClick={toggleCamera}
-              className={`flex items-center gap-2 px-6 py-2 rounded-lg font-medium transition-all transform hover:scale-105 ${
-                isStreaming 
-                  ? 'bg-red-500 hover:bg-red-600 text-white shadow-lg shadow-red-500/50' 
-                  : 'bg-gradient-to-r from-blue-500 to-green-600 hover:from-blue-600 hover:to-green-700 text-white shadow-lg shadow-blue-500/50'
-              }`}
-            >
-              {isStreaming ? (
-                <>
-                  <Square size={20} />
-                  Stop Session
-                </>
-              ) : (
-                <>
-                  <Camera size={20} />
-                  Start Session
-                </>
-              )}
-            </button>
+            <div className="flex flex-wrap items-center gap-2 sm:gap-3">
+              <button
+                type="button"
+                onClick={playSessionTips}
+                disabled={tipsLoading}
+                className="flex items-center gap-2 px-5 py-2 rounded-lg font-medium transition-all border border-amber-400/50 bg-amber-500/20 hover:bg-amber-500/30 text-amber-100 disabled:opacity-50 disabled:cursor-not-allowed"
+                title="Hear session tips (ElevenLabs)"
+              >
+                {tipsLoading ? (
+                  <Loader2 size={20} className="animate-spin" />
+                ) : (
+                  <Lightbulb size={20} />
+                )}
+                Tips
+              </button>
+              <button
+                onClick={toggleCamera}
+                className={`flex items-center gap-2 px-6 py-2 rounded-lg font-medium transition-all transform hover:scale-105 ${
+                  isStreaming 
+                    ? 'bg-red-500 hover:bg-red-600 text-white shadow-lg shadow-red-500/50' 
+                    : 'bg-gradient-to-r from-blue-500 to-green-600 hover:from-blue-600 hover:to-green-700 text-white shadow-lg shadow-blue-500/50'
+                }`}
+              >
+                {isStreaming ? (
+                  <>
+                    <Square size={20} />
+                    Stop Session
+                  </>
+                ) : (
+                  <>
+                    <Camera size={20} />
+                    Start Session
+                  </>
+                )}
+              </button>
+            </div>
           </div>
 
           <div className="bg-black/30 rounded-lg p-3">
@@ -1001,10 +1252,18 @@ Emotion Detection: ${emotionDetectionStatus === 'ready' ? 'Enabled (Server-side 
               {debugInfo || 'Waiting for connection...'}
             </p>
             {isStreaming && (
-              <div className="flex gap-4 mt-2 text-xs text-gray-400">
+              <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2 text-xs text-gray-400">
                 <span>📤 Frames: {framesSent}</span>
                 <span>🎯 Predictions: {predictionsReceived}</span>
                 <span>😊 Emotions: {emotionHistory.length} detected</span>
+                {lastDtwScore != null && (
+                  <span className="text-indigo-300">
+                    📊 Last match: {lastDtwScore}/100
+                  </span>
+                )}
+                {sessionAvgDtwLive != null && (
+                  <span className="text-indigo-300/90">Session avg (DTW): {sessionAvgDtwLive}</span>
+                )}
               </div>
             )}
           </div>
@@ -1159,6 +1418,11 @@ Emotion Detection: ${emotionDetectionStatus === 'ready' ? 'Enabled (Server-side 
                 <p className="text-4xl font-bold text-white mb-3 animate-pulse">{prediction}</p>
                 <div className="flex flex-col items-center gap-2 text-sm text-gray-300">
                   <div className="flex items-center justify-center gap-3 flex-wrap">
+                    {lastDtwScore != null && (
+                      <span className="bg-indigo-500/35 text-indigo-100 px-3 py-1 rounded-full text-xs font-medium">
+                        DTW {lastDtwScore}/100
+                      </span>
+                    )}
                     <span className="bg-green-500/30 px-3 py-1 rounded-full">
                       Prediction #{predictionsReceived}
                     </span>
@@ -1202,6 +1466,9 @@ Emotion Detection: ${emotionDetectionStatus === 'ready' ? 'Enabled (Server-side 
                       <span className="text-gray-300 font-medium">{pred.text}</span>
                       <p className="text-xs text-gray-500">
                         {new Date(pred.timestamp).toLocaleTimeString()} • {pred.emotion} ({pred.emotionConfidence}%)
+                        {typeof pred.dtwScore === 'number' && (
+                          <span className="text-indigo-400 ml-1">· DTW {pred.dtwScore}</span>
+                        )}
                       </p>
                     </div>
                   </div>
