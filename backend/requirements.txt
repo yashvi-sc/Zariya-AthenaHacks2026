@@ -1,0 +1,31 @@
+# Core API
+flask>=3.0
+flask-cors
+itsdangerous
+werkzeug
+
+# Lip reading / vision
+# mediapipe 0.10.x: older stacks used numpy<2 + protobuf 4.x; Python 3.13 needs numpy 2.x wheels
+# and TensorFlow 2.20+ needs protobuf>=5.28 (conflicts with TF 2.15-era pins).
+numpy>=1.26.0,<2.0.0; python_version < "3.13"
+numpy>=2.0,<3; python_version >= "3.13"
+protobuf>=4.25.3,<5.0.0; python_version < "3.13"
+protobuf>=5.28,<6; python_version >= "3.13"
+opencv-python
+mediapipe>=0.10,<0.11
+torch
+
+# AV-HuBERT (after cloning facebookresearch/av_hubert + submodules):
+#   pip install -e third_party/av_hubert/fairseq
+# PyPI fairseq may not match; use the repo's fairseq submodule.
+
+# Template matching / ML stack used in app
+scikit-learn
+
+# Emotion detection (DeepFace + TensorFlow Keras backend)
+# TF 2.15–2.16: no Python 3.13 wheels; use TF 2.20+ on 3.13 (needs protobuf 5.x — see above).
+deepface>=0.0.90
+tf-keras; python_version < "3.13"
+tf-keras>=2.20; python_version >= "3.13"
+tensorflow>=2.15,<2.17; python_version < "3.13"
+tensorflow>=2.20; python_version >= "3.13"
